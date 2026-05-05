@@ -408,6 +408,8 @@ func _skill_color(key: String) -> Color:
 
 # 范围技能特效：角色蓄力，技能范围闪烁扩散。
 func _play_skill_animation(caster: BattleUnit, cells: Array[Vector2i], color: Color) -> void:
+	await caster.play_skill_animation()
+
 	var original_scale := caster.sprite.scale
 	var charge := create_tween()
 	charge.tween_property(caster.sprite, "scale", original_scale * 1.22, 0.12)

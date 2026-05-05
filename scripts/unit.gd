@@ -201,6 +201,7 @@ func _build_sprite_frames(unit_key: String) -> SpriteFrames:
 	_add_animation_frames(frames, unit_key, "idle", 4, 6.0, true)
 	_add_animation_frames(frames, unit_key, "move", 4, 10.0, true)
 	_add_animation_frames(frames, unit_key, "attack", 4, 12.0, false)
+	_add_animation_frames(frames, unit_key, "skill", 4, 10.0, false)
 	_add_animation_frames(frames, unit_key, "hit", 3, 14.0, false)
 	_add_animation_frames(frames, unit_key, "defeat", 4, 10.0, false)
 	_add_animation_frames(frames, unit_key, "death", 4, 10.0, false)
@@ -212,7 +213,10 @@ func _add_animation_frames(frames: SpriteFrames, unit_key: String, animation_nam
 	frames.set_animation_speed(animation_name, fps)
 	frames.set_animation_loop(animation_name, loops)
 	for index in range(frame_count):
-		var texture := load("res://assets/generated/unit_frames/%s/%s_%d.png" % [unit_key, animation_name, index]) as Texture2D
+		var frame_path := "res://assets/generated/unit_frames/%s/%s_%d.png" % [unit_key, animation_name, index]
+		if not ResourceLoader.exists(frame_path):
+			continue
+		var texture := load(frame_path) as Texture2D
 		frames.add_frame(animation_name, texture)
 
 
@@ -241,6 +245,19 @@ func play_move_animation(duration: float) -> void:
 func play_attack_animation(target_position: Vector2) -> void:
 	is_playing_action_animation = true
 	sprite.play("attack")
+	await sprite.animation_finished
+	_play_idle_animation()
+
+
+# 播放职业技能动画。
+# 这个动画使用 assets/generated/unit_frames/<unit>/skill_0.png 到 skill_3.png。
+# 如果某个单位还没有专门的 skill 帧，就退回播放 attack，避免新增素材时因为漏帧而中断战斗流程。
+func play_skill_animation() -> void:
+	is_playing_action_animation = true
+	if sprite.sprite_frames != null and sprite.sprite_frames.has_animation("skill"):
+		sprite.play("skill")
+	else:
+		sprite.play("attack")
 	await sprite.animation_finished
 	_play_idle_animation()
 
