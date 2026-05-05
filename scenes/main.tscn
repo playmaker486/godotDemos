@@ -1,7 +1,70 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://scripts/game.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/grid_board.gd" id="2"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ActionMenuPanel"]
+bg_color = Color(0.08, 0.1, 0.13, 0.58)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.88, 0.7, 0.33, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.28)
+shadow_size = 5
+shadow_offset = Vector2(0, 3)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ActionButton"]
+bg_color = Color(0.18, 0.22, 0.28, 0.78)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.5, 0.56, 0.64, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ActionButtonHover"]
+bg_color = Color(0.28, 0.34, 0.42, 0.88)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.9, 0.72, 0.36, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ActionButtonPressed"]
+bg_color = Color(0.12, 0.15, 0.19, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 0.84, 0.42, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ActionButtonDisabled"]
+bg_color = Color(0.1, 0.11, 0.13, 0.85)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.25, 0.27, 0.3, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1")
@@ -48,3 +111,71 @@ text = "Select a unit to act."
 unique_name_in_owner = true
 layout_mode = 2
 text = "End Turn"
+
+[node name="ActionMenu" type="PanelContainer" parent="UI"]
+unique_name_in_owner = true
+visible = false
+offset_left = 24.0
+offset_top = 96.0
+offset_right = 148.0
+offset_bottom = 244.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_ActionMenuPanel")
+
+[node name="MarginContainer" type="MarginContainer" parent="UI/ActionMenu"]
+theme_override_constants/margin_left = 7
+theme_override_constants/margin_top = 7
+theme_override_constants/margin_right = 7
+theme_override_constants/margin_bottom = 7
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UI/ActionMenu/MarginContainer"]
+theme_override_constants/separation = 5
+
+[node name="MoveButton" type="Button" parent="UI/ActionMenu/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 26)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_ActionButton")
+theme_override_styles/hover = SubResource("StyleBoxFlat_ActionButtonHover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_ActionButtonPressed")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_ActionButtonDisabled")
+text = "移动"
+
+[node name="AttackButton" type="Button" parent="UI/ActionMenu/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 26)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_ActionButton")
+theme_override_styles/hover = SubResource("StyleBoxFlat_ActionButtonHover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_ActionButtonPressed")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_ActionButtonDisabled")
+text = "攻击"
+
+[node name="DefendButton" type="Button" parent="UI/ActionMenu/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 26)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_ActionButton")
+theme_override_styles/hover = SubResource("StyleBoxFlat_ActionButtonHover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_ActionButtonPressed")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_ActionButtonDisabled")
+text = "防守"
+
+[node name="SkillButton" type="Button" parent="UI/ActionMenu/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 26)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_ActionButton")
+theme_override_styles/hover = SubResource("StyleBoxFlat_ActionButtonHover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_ActionButtonPressed")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_ActionButtonDisabled")
+text = "技能"
+
+[node name="CancelButton" type="Button" parent="UI/ActionMenu/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 26)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_ActionButton")
+theme_override_styles/hover = SubResource("StyleBoxFlat_ActionButtonHover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_ActionButtonPressed")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_ActionButtonDisabled")
+text = "取消"

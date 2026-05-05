@@ -5,10 +5,15 @@
 当前已包含：
 
 - 棋盘绘制与障碍格
-- 玩家单位和敌方单位
+- 四个玩家角色：Warrior、Mage、Ranger、Cleric
+- 四个敌方怪物：Werewolf、Goblin、Necromancer、Vampire
+- 野外地形：草地、山丘、河流、岩石障碍
 - 单位选择、移动、攻击
+- 选中单位后的操作菜单：Attack、Defend、Skill
+- 职业技能与技能冷却
 - 玩家回合与简单敌方 AI 回合
 - 顶部状态栏与结束回合按钮
+- 一套 AI 生成的原创占位美术素材
 
 主场景是 `res://scenes/main.tscn`。
 
@@ -29,62 +34,91 @@ E:\godot\Godot_v4.6.2-stable_win64_console.exe --path E:\myindiegames\gamedemo1 
 
 ## 如何替换美术素材
 
-当前项目里大部分画面都是脚本里的 `_draw()` 临时画出来的。这些占位图形不是最终美术，只是为了让玩法能先跑起来。
+当前项目已经接入了一套 AI 生成的原创占位美术。素材集中放在 `res://assets/generated/`，后续你可以逐张替换。
 
 ### 单位外观
 
 单位场景在 `res://scenes/unit.tscn`，脚本是 `res://scripts/unit.gd`。
 
-当前单位外观由 `unit.gd` 的 `_draw()` 绘制：
+当前单位外观由 `unit.tscn` 里的 `AnimatedSprite2D` 显示。每个角色的帧动画放在：
 
-- 蓝色圆形：玩家单位
-- 红色圆形：敌方单位
-- 黄色外圈：当前选中的单位
-- 绿色血条：单位当前血量
+`assets/generated/unit_frames/<角色名>/`
+
+当前每个角色都有这些动画：
+
+- `idle_0.png` 到 `idle_3.png`
+- `move_0.png` 到 `move_3.png`
+- `attack_0.png` 到 `attack_3.png`
+- `hit_0.png` 到 `hit_2.png`
+- `defeat_0.png` 到 `defeat_3.png`
+- `death_0.png` 到 `death_3.png`
+
+旧的单张角色图仍然保留在：
+
+- `assets/generated/units/warrior.png`
+- `assets/generated/units/mage.png`
+- `assets/generated/units/ranger.png`
+- `assets/generated/units/cleric.png`
+- `assets/generated/units/werewolf.png`
+- `assets/generated/units/goblin.png`
+- `assets/generated/units/necromancer.png`
+- `assets/generated/units/vampire.png`
 
 替换方式：
 
 1. 打开 `scenes/unit.tscn`。
-2. 在 `Unit` 节点下面添加 `Sprite2D` 或 `AnimatedSprite2D`。
-3. 给新节点设置自己的角色图片或动画帧。
-4. 如果不想再显示圆形占位图，可以删除或注释 `unit.gd` 里的 `_draw()` 绘制内容。
-5. 保留 `Area2D` 和 `CollisionShape2D`，因为它们负责鼠标点击检测。
+2. 保留 `Unit` 节点、`AnimatedSprite2D` 和 `CollisionShape2D`。
+3. 用同名 PNG 覆盖 `assets/generated/unit_frames/<角色名>/` 里的帧图片。
+4. 如果帧数变化，需要同步修改 `unit.gd` 里的 `_add_animation_frames()` 调用参数。
 
-建议先保留血条绘制，只替换角色本体。等角色图稳定后，再把血条也换成独立的 UI 节点或美术资源。
+`unit.gd` 的 `_draw()` 现在只画选中圈、悬停圈和血条。建议先保留这些辅助显示，等角色图稳定后再换成正式 UI。
 
 ### 棋盘格子
 
 棋盘节点在 `res://scenes/main.tscn` 的 `Board` 节点上，脚本是 `res://scripts/grid_board.gd`。
 
-当前棋盘由 `grid_board.gd` 的 `_draw()` 绘制：
+当前棋盘由 `grid_board.gd` 的 `_draw()` 绘制，但绘制时已经使用生成好的 64x64 图块：
 
-- 深色方格：普通地形
-- 灰色带叉方格：障碍格
-- 蓝色方格：可移动范围
-- 红色方格：可攻击范围
-- 变亮方格：鼠标悬停的格子
+- `assets/generated/tiles/grass.png`
+- `assets/generated/tiles/hill.png`
+- `assets/generated/tiles/river.png`
+- `assets/generated/tiles/rocks.png`
+- `assets/generated/tiles/highlight_move.png`
+- `assets/generated/tiles/highlight_attack.png`
+- `assets/generated/tiles/highlight_hover.png`
+
+草地和河流已经有帧动画：
+
+- `assets/generated/tile_frames/grass_0.png` 到 `grass_5.png`
+- `assets/generated/tile_frames/river_0.png` 到 `river_5.png`
 
 替换方式有两种：
 
-1. 继续使用脚本绘制，只修改 `grid_board.gd` 里的颜色和线条。
-2. 改成 `TileMapLayer` 或自定义贴图节点，用图片资源绘制地形。
+1. 直接用同名 PNG 覆盖 `assets/generated/tiles/` 里的图片。
+2. 修改 `grid_board.gd` 顶部 preload 路径，指向你的正式素材。
+3. 后续改成 `TileMapLayer` 或自定义贴图节点，用图片资源绘制地形。
 
 如果改成 `TileMapLayer`，建议保留 `GridBoard` 脚本里的坐标转换方法，例如 `world_to_cell()` 和 `cell_to_world()`，因为战棋逻辑仍然需要格子坐标。
 
 ### 障碍格
 
-障碍格配置在 `grid_board.gd` 的 `blocked_cells` 变量里：
+障碍和特殊地形配置在 `grid_board.gd`：
 
 ```gdscript
 @export var blocked_cells: Array[Vector2i] = [
-	Vector2i(4, 2),
-	Vector2i(4, 3),
-	Vector2i(5, 3),
-	Vector2i(7, 1),
+	...
+]
+
+@export var hill_cells: Array[Vector2i] = [
+	...
+]
+
+@export var river_cells: Array[Vector2i] = [
+	...
 ]
 ```
 
-你可以在 Godot Inspector 里修改这个数组，也可以直接改脚本。后续如果使用关卡编辑器或 TileMapLayer，可以把障碍格改成从地图数据里读取。
+`blocked_cells` 和 `river_cells` 当前不可通行；`hill_cells` 目前只是视觉地形，可以通行。
 
 ### 移动和攻击高亮
 
@@ -107,6 +141,7 @@ E:\godot\Godot_v4.6.2-stable_win64_console.exe --path E:\myindiegames\gamedemo1 
 - `TurnLabel`：显示当前回合
 - `InfoLabel`：显示操作提示
 - `EndTurnButton`：结束回合按钮
+- `assets/generated/ui/end_turn_button.png`：生成的按钮素材
 
 可以替换的内容：
 
@@ -116,15 +151,32 @@ E:\godot\Godot_v4.6.2-stable_win64_console.exe --path E:\myindiegames\gamedemo1 
 - 回合提示文字
 - 信息提示文字
 
+当前按钮图片通过 `game.gd` 的 `_style_end_turn_button()` 接入。后续要做更完整的 UI，可以给按钮创建 Godot Theme。
+
 这些 UI 不影响战斗逻辑，可以放心换主题、字体和布局。
 
 ## 代码入口
 
 - `scripts/game.gd`：战斗流程、回合、输入、敌方 AI、胜负判断
-- `scripts/grid_board.gd`：棋盘、格子坐标、障碍、高亮绘制
-- `scripts/unit.gd`：单位属性、血量、行动状态、点击检测、占位绘制
+- `scripts/grid_board.gd`：棋盘、格子坐标、野外地形、障碍、高亮绘制
+- `scripts/unit.gd`：单位属性、血量、行动状态、点击检测、角色图片显示
 
 如果你是 Godot 新手，建议先读 `unit.gd`，再读 `grid_board.gd`，最后读 `game.gd`。这样会比较容易理解“单位是什么 -> 棋盘是什么 -> 回合流程怎么把它们连起来”。
+
+## 当前战斗操作
+
+点击我方单位后会弹出操作菜单：
+
+- `Attack`：进入普通攻击模式，点击红色范围内的敌人进行攻击。
+- `Defend`：进入防守，本回合行动结束，并让下一次受到的伤害减半。
+- `Skill`：释放职业技能。技能释放后进入冷却，冷却会在玩家新回合开始时减少。
+
+当前职业技能：
+
+- Warrior / Whirlwind：冷却 2 回合，以自己为中心 3x3 范围内所有敌人受到 1.2 倍普攻伤害。
+- Mage / Fireball：冷却 3 回合，前方 3x3 范围内所有敌人受到 1.5 倍普攻伤害。
+- Ranger / Arrow Rain：冷却 3 回合，前方直线 6 格内所有敌人受到 1.2 倍普攻伤害。
+- Cleric / Group Heal：冷却 3 回合，以自己为中心 3x3 范围内所有友方回复最大生命的 1/3。
 
 ## 踩坑记录
 

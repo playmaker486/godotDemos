@@ -8,8 +8,36 @@ extends Node2D
 # VICTORY / DEFEAT：战斗结束，按钮和输入不再推进回合。
 enum Phase { PLAYER_TURN, ENEMY_TURN, VICTORY, DEFEAT }
 
+# 玩家选中单位后的操作模式。
+# MOVE：默认移动模式，可以点击蓝色格移动。
+# ATTACK：点击敌方单位进行普通攻击。
+# SKILL：点击技能按钮后的技能模式；部分技能会立即释放。
+enum ActionMode { MOVE, ATTACK, SKILL }
+
 # 单位场景。所有玩家和敌人都会从这个场景实例化出来。
 const UNIT_SCENE := preload("res://scenes/unit.tscn")
+const END_TURN_BUTTON_TEXTURE := preload("res://assets/generated/ui/end_turn_button.png")
+
+# 相机自适应缩放用的边距。
+# UI_TOP_RESERVED 是给顶部状态栏预留的屏幕高度，避免棋盘被 UI 盖住。
+const CAMERA_MARGIN := 32.0
+const UI_TOP_RESERVED := 80.0
+const MIN_CAMERA_ZOOM := 0.65
+const MAX_CAMERA_ZOOM := 1.8
+
+# 各职业技能参数。
+const SKILL_COOLDOWNS := {
+	"warrior": 2,
+	"mage": 3,
+	"ranger": 3,
+	"cleric": 3,
+}
+const SKILL_NAMES := {
+	"warrior": "旋风斩",
+	"mage": "火球术",
+	"ranger": "直射弓箭雨",
+	"cleric": "群体治愈",
+}
 
 # 四方向移动。战旗游戏里通常只允许上下左右走格子，不允许斜向移动。
 const DIRECTIONS := [
@@ -30,6 +58,16 @@ const DIRECTIONS := [
 @onready var turn_label: Label = %TurnLabel
 @onready var info_label: Label = %InfoLabel
 @onready var end_turn_button: Button = %EndTurnButton
+@onready var action_menu: PanelContainer = %ActionMenu
+@onready var move_button: Button = %MoveButton
+@onready var attack_button: Button = %AttackButton
+@onready var defend_button: Button = %DefendButton
+@onready var skill_button: Button = %SkillButton
+@onready var cancel_button: Button = %CancelButton
+
+# 负责显示战场的 2D 相机。
+# 窗口大小变化时会自动调整 zoom，让整张棋盘尽量完整显示。
+@onready var camera: Camera2D = $Camera2D
 
 # 当前战斗阶段，默认从玩家回合开始。
 var phase := Phase.PLAYER_TURN
@@ -49,14 +87,25 @@ var reachable_cells: Array[Vector2i] = []
 # 玩家点击敌方单位时，会用它判断能不能攻击。
 var attackable_cells: Array[Vector2i] = []
 
+# 当前菜单选择的操作模式。
+var action_mode := ActionMode.MOVE
+
 
 # Godot 在节点进入场景树并准备完成后调用。
 # 这里连接按钮事件、生成默认单位，并初始化 UI。
 func _ready() -> void:
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
+	move_button.pressed.connect(_on_move_button_pressed)
+	attack_button.pressed.connect(_on_attack_button_pressed)
+	defend_button.pressed.connect(_on_defend_button_pressed)
+	skill_button.pressed.connect(_on_skill_button_pressed)
+	cancel_button.pressed.connect(_on_cancel_button_pressed)
+	get_viewport().size_changed.connect(_fit_camera_to_viewport)
+	_style_end_turn_button()
 	_spawn_default_units()
-	_show_info("Select a unit to act.")
+	_show_info("选择我方单位开始行动。")
 	_update_ui()
+	_fit_camera_to_viewport.call_deferred()
 
 
 # 处理没有被 UI 或 Area2D 消耗掉的鼠标输入。
@@ -76,7 +125,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_on_unit_selected(unit_at_cell)
 			return
 
-		if selected_unit != null and reachable_cells.has(clicked_cell):
+		if selected_unit != null and action_mode == ActionMode.MOVE and reachable_cells.has(clicked_cell):
 			await _move_unit(selected_unit, clicked_cell)
 			_refresh_selection_after_action()
 
@@ -85,10 +134,14 @@ func _unhandled_input(event: InputEvent) -> void:
 # 后续做关卡系统时，可以把这份数据改成从关卡资源、JSON 或 TileMap 标记里读取。
 func _spawn_default_units() -> void:
 	var unit_data := [
-		{"name": "Captain", "team": "player", "grid_position": Vector2i(1, 3), "max_hp": 14, "attack_power": 5, "move_range": 3},
-		{"name": "Archer", "team": "player", "grid_position": Vector2i(1, 5), "max_hp": 10, "attack_power": 4, "move_range": 3, "attack_range": 2},
-		{"name": "Raider", "team": "enemy", "grid_position": Vector2i(8, 2), "max_hp": 10, "attack_power": 3, "move_range": 3},
-		{"name": "Guard", "team": "enemy", "grid_position": Vector2i(8, 5), "max_hp": 12, "attack_power": 4, "move_range": 2},
+		{"name": "Warrior", "team": "player", "grid_position": Vector2i(1, 1), "max_hp": 16, "attack_power": 5, "move_range": 3},
+		{"name": "Mage", "team": "player", "grid_position": Vector2i(1, 3), "max_hp": 9, "attack_power": 6, "move_range": 3, "attack_range": 2},
+		{"name": "Ranger", "team": "player", "grid_position": Vector2i(1, 5), "max_hp": 11, "attack_power": 4, "move_range": 4, "attack_range": 2},
+		{"name": "Cleric", "team": "player", "grid_position": Vector2i(2, 6), "max_hp": 12, "attack_power": 3, "move_range": 3},
+		{"name": "Werewolf", "team": "enemy", "grid_position": Vector2i(8, 1), "max_hp": 14, "attack_power": 5, "move_range": 4},
+		{"name": "Goblin", "team": "enemy", "grid_position": Vector2i(8, 3), "max_hp": 9, "attack_power": 3, "move_range": 3},
+		{"name": "Necromancer", "team": "enemy", "grid_position": Vector2i(7, 5), "max_hp": 10, "attack_power": 5, "move_range": 2, "attack_range": 2},
+		{"name": "Vampire", "team": "enemy", "grid_position": Vector2i(8, 6), "max_hp": 13, "attack_power": 4, "move_range": 3},
 	]
 
 	for data in unit_data:
@@ -97,6 +150,314 @@ func _spawn_default_units() -> void:
 		unit.setup(data, board.cell_size)
 		unit.selected.connect(_on_unit_selected)
 		units.append(unit)
+
+
+# 给结束回合按钮加上生成的 UI 图片。
+# 这里用 icon 是最稳的接入方式；后续可以进一步换成完整 Theme。
+func _style_end_turn_button() -> void:
+	end_turn_button.icon = END_TURN_BUTTON_TEXTURE
+	end_turn_button.custom_minimum_size = Vector2(170.0, 48.0)
+
+
+# 根据窗口大小调整相机缩放。
+# Godot 的 Camera2D.zoom 越大，看起来越放大；越小，看起来越缩小。
+# 这里用棋盘尺寸和窗口尺寸算出一个合适的 zoom，保证全屏和小窗口都能看到完整棋盘。
+func _fit_camera_to_viewport() -> void:
+	if board == null or camera == null:
+		return
+
+	var viewport_size: Vector2 = Vector2(get_viewport_rect().size)
+	var board_size: Vector2 = Vector2(board.grid_size * board.cell_size)
+	var available_size: Vector2 = Vector2(
+		max(viewport_size.x - CAMERA_MARGIN * 2.0, board.cell_size),
+		max(viewport_size.y - UI_TOP_RESERVED - CAMERA_MARGIN * 2.0, board.cell_size)
+	)
+	var zoom_value: float = min(available_size.x / board_size.x, available_size.y / board_size.y)
+	zoom_value = clamp(zoom_value, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM)
+
+	camera.zoom = Vector2(zoom_value, zoom_value)
+	camera.position = board.position + board_size * 0.5 - Vector2(0.0, UI_TOP_RESERVED * 0.5 / zoom_value)
+
+
+# 显示单位操作菜单，并根据技能冷却刷新按钮状态。
+func _show_action_menu(unit: BattleUnit) -> void:
+	move_button.text = "移动"
+	attack_button.text = "攻击"
+	defend_button.text = "防守"
+	cancel_button.text = "取消"
+	move_button.disabled = unit.has_moved
+	attack_button.disabled = false
+	defend_button.disabled = false
+
+	var skill_key := _skill_key(unit)
+	var skill_name := _skill_name(unit)
+	if skill_key == "" or unit.skill_cooldown_remaining > 0:
+		skill_button.disabled = true
+		skill_button.text = "冷却:%d" % unit.skill_cooldown_remaining
+	else:
+		skill_button.disabled = false
+		skill_button.text = "技能"
+
+	action_menu.visible = true
+	_position_action_menu(unit)
+
+
+# 把操作菜单放在单位附近，并限制在窗口范围内。
+func _position_action_menu(unit: BattleUnit) -> void:
+	var screen_position: Vector2 = get_viewport().get_canvas_transform() * unit.global_position
+	var viewport_size: Vector2 = Vector2(get_viewport_rect().size)
+	var menu_size := Vector2(124.0, 178.0)
+	action_menu.position = Vector2(
+		clamp(screen_position.x + 28.0, 12.0, max(12.0, viewport_size.x - menu_size.x - 12.0)),
+		clamp(screen_position.y - 48.0, UI_TOP_RESERVED, max(UI_TOP_RESERVED, viewport_size.y - menu_size.y - 12.0))
+	)
+
+
+# 点击移动按钮：进入移动模式，并显示蓝色移动范围。
+func _on_move_button_pressed() -> void:
+	if selected_unit == null or selected_unit.has_acted or selected_unit.has_moved:
+		return
+	action_mode = ActionMode.MOVE
+	reachable_cells = _find_reachable_cells(selected_unit)
+	attackable_cells.clear()
+	board.set_highlights(reachable_cells, attackable_cells)
+	action_menu.visible = false
+	_show_info("移动模式：点击蓝色格子移动。")
+
+
+# 点击攻击按钮：切到普通攻击模式，只显示可攻击目标。
+func _on_attack_button_pressed() -> void:
+	if selected_unit == null or selected_unit.has_acted:
+		return
+	action_mode = ActionMode.ATTACK
+	reachable_cells.clear()
+	attackable_cells = _find_attack_cells(selected_unit.grid_position, selected_unit.attack_range, true)
+	board.set_highlights(reachable_cells, attackable_cells)
+	action_menu.visible = false
+	_show_info("攻击模式：点击红色范围内的敌人。")
+
+
+# 点击防守按钮：单位进入防守状态，受到的下一次伤害减半。
+func _on_defend_button_pressed() -> void:
+	if selected_unit == null or selected_unit.has_acted:
+		return
+	await _play_defend_animation(selected_unit)
+	selected_unit.defend()
+	_show_info("%s 进入防守，下一次受到伤害减半。" % selected_unit.unit_name)
+	_refresh_selection_after_action()
+
+
+# 点击技能按钮：根据职业释放对应技能。
+func _on_skill_button_pressed() -> void:
+	if selected_unit == null or selected_unit.has_acted or selected_unit.skill_cooldown_remaining > 0:
+		return
+	action_mode = ActionMode.SKILL
+	action_menu.visible = false
+	await _execute_skill(selected_unit)
+	_refresh_selection_after_action()
+
+
+# 点击取消按钮：取消当前单位选中，并关闭操作菜单。
+func _on_cancel_button_pressed() -> void:
+	_clear_selection()
+	_show_info("已取消选择。")
+
+
+# 返回单位职业对应的技能 key。
+func _skill_key(unit: BattleUnit) -> String:
+	var key := unit.unit_name.to_lower()
+	return key if SKILL_COOLDOWNS.has(key) else ""
+
+
+# 返回单位技能显示名。
+func _skill_name(unit: BattleUnit) -> String:
+	var key := _skill_key(unit)
+	return String(SKILL_NAMES.get(key, "Skill"))
+
+
+# 返回单位技能冷却回合数。
+func _skill_cooldown(unit: BattleUnit) -> int:
+	var key := _skill_key(unit)
+	return int(SKILL_COOLDOWNS.get(key, 0))
+
+
+# 执行当前单位的职业技能。
+func _execute_skill(caster: BattleUnit) -> void:
+	var key := _skill_key(caster)
+	if key == "":
+		return
+
+	var cells := _skill_cells(caster, key)
+	board.set_highlights([], cells)
+	await _play_skill_animation(caster, cells, _skill_color(key))
+
+	match key:
+		"warrior":
+			await _damage_units_in_cells(caster, cells, 1.2)
+		"mage":
+			await _damage_units_in_cells(caster, cells, 1.5)
+		"ranger":
+			await _damage_units_in_cells(caster, cells, 1.2)
+		"cleric":
+			await _heal_units_in_cells(caster, cells)
+
+	caster.skill_cooldown_remaining = _skill_cooldown(caster)
+	caster.has_acted = true
+	_show_info("%s uses %s." % [caster.unit_name, _skill_name(caster)])
+
+
+# 根据职业技能生成影响格子。
+func _skill_cells(caster: BattleUnit, key: String) -> Array[Vector2i]:
+	match key:
+		"warrior":
+			return _cells_in_square(caster.grid_position, 1)
+		"mage":
+			return _cells_in_front_box(caster.grid_position, _front_direction(caster), 3, 1)
+		"ranger":
+			return _cells_in_front_line(caster.grid_position, _front_direction(caster), 6)
+		"cleric":
+			return _cells_in_square(caster.grid_position, 1)
+	return []
+
+
+# 玩家默认面向右，敌方默认面向左。
+func _front_direction(unit: BattleUnit) -> Vector2i:
+	return Vector2i.RIGHT if unit.team == "player" else Vector2i.LEFT
+
+
+# 获取以 center 为中心，半径为 radius 的方形区域。
+func _cells_in_square(center: Vector2i, radius: int) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for y in range(center.y - radius, center.y + radius + 1):
+		for x in range(center.x - radius, center.x + radius + 1):
+			var cell := Vector2i(x, y)
+			if board.is_inside(cell):
+				cells.append(cell)
+	return cells
+
+
+# 获取前方 depth 格、左右 side_radius 格的矩形区域。
+func _cells_in_front_box(origin: Vector2i, direction: Vector2i, depth: int, side_radius: int) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for step in range(1, depth + 1):
+		for side in range(-side_radius, side_radius + 1):
+			var cell := origin + direction * step + Vector2i(0, side)
+			if board.is_inside(cell):
+				cells.append(cell)
+	return cells
+
+
+# 获取前方直线 distance 格。
+func _cells_in_front_line(origin: Vector2i, direction: Vector2i, distance: int) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for step in range(1, distance + 1):
+		var cell := origin + direction * step
+		if board.is_inside(cell):
+			cells.append(cell)
+	return cells
+
+
+# 对范围内所有敌人造成倍率伤害。
+func _damage_units_in_cells(caster: BattleUnit, cells: Array[Vector2i], multiplier: float) -> void:
+	var targets := _units_in_cells(cells, _opposing_team(caster.team))
+	var damage := maxi(1, roundi(float(caster.attack_power) * multiplier))
+	for target in targets:
+		await target.play_hit_animation()
+		var defeated := target.take_damage(damage)
+		if defeated:
+			await target.play_defeat_animation()
+			await target.play_death_animation()
+			units.erase(target)
+			target.queue_free()
+
+
+# 对范围内所有友方回复 1/3 最大生命。
+func _heal_units_in_cells(caster: BattleUnit, cells: Array[Vector2i]) -> void:
+	var targets := _units_in_cells(cells, caster.team)
+	for target in targets:
+		var heal_amount := maxi(1, ceili(float(target.max_hp) / 3.0))
+		target.heal(heal_amount)
+		await _play_heal_animation(target)
+
+
+# 从格子列表里筛出指定阵营单位。
+func _units_in_cells(cells: Array[Vector2i], team: String) -> Array[BattleUnit]:
+	var result: Array[BattleUnit] = []
+	for unit in units:
+		if unit.team == team and cells.has(unit.grid_position):
+			result.append(unit)
+	return result
+
+
+func _opposing_team(team: String) -> String:
+	return "enemy" if team == "player" else "player"
+
+
+func _skill_color(key: String) -> Color:
+	match key:
+		"warrior":
+			return Color(1.0, 0.84, 0.28, 0.62)
+		"mage":
+			return Color(1.0, 0.25, 0.08, 0.68)
+		"ranger":
+			return Color(0.42, 1.0, 0.35, 0.62)
+		"cleric":
+			return Color(0.6, 1.0, 0.88, 0.65)
+	return Color.WHITE
+
+
+# 范围技能特效：角色蓄力，技能范围闪烁扩散。
+func _play_skill_animation(caster: BattleUnit, cells: Array[Vector2i], color: Color) -> void:
+	var original_scale := caster.sprite.scale
+	var charge := create_tween()
+	charge.tween_property(caster.sprite, "scale", original_scale * 1.22, 0.12)
+	charge.tween_property(caster.sprite, "scale", original_scale, 0.12)
+	await charge.finished
+
+	var effects_root := Node2D.new()
+	board.add_child(effects_root)
+	for cell in cells:
+		var poly := Polygon2D.new()
+		var size := float(board.cell_size)
+		poly.polygon = PackedVector2Array([
+			Vector2.ZERO,
+			Vector2(size, 0.0),
+			Vector2(size, size),
+			Vector2(0.0, size),
+		])
+		poly.position = Vector2(cell * board.cell_size)
+		poly.color = color
+		poly.scale = Vector2(0.25, 0.25)
+		poly.position += Vector2(size, size) * 0.375
+		effects_root.add_child(poly)
+
+		var tween := create_tween()
+		tween.tween_property(poly, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tween.parallel().tween_property(poly, "position", Vector2(cell * board.cell_size), 0.12)
+		tween.tween_property(poly, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.28)
+
+	await get_tree().create_timer(0.45).timeout
+	effects_root.queue_free()
+
+
+# 治疗命中特效。
+func _play_heal_animation(target: BattleUnit) -> void:
+	var tween := create_tween()
+	tween.tween_property(target.sprite, "modulate", Color(0.55, 1.0, 0.75, 1.0), 0.08)
+	tween.parallel().tween_property(target.sprite, "scale", Vector2(1.15, 1.15), 0.08)
+	tween.tween_property(target.sprite, "modulate", Color.WHITE, 0.12)
+	tween.parallel().tween_property(target.sprite, "scale", Vector2.ONE, 0.12)
+	await tween.finished
+
+
+# 防守特效。
+func _play_defend_animation(unit: BattleUnit) -> void:
+	var tween := create_tween()
+	tween.tween_property(unit.sprite, "modulate", Color(0.55, 0.72, 1.0, 1.0), 0.1)
+	tween.parallel().tween_property(unit.sprite, "scale", Vector2(0.92, 1.08), 0.1)
+	tween.tween_property(unit.sprite, "modulate", Color.WHITE, 0.14)
+	tween.parallel().tween_property(unit.sprite, "scale", Vector2.ONE, 0.14)
+	await tween.finished
 
 
 # 处理单位被点击后的逻辑。
@@ -112,9 +473,13 @@ func _on_unit_selected(unit: BattleUnit) -> void:
 		_select_unit(unit)
 		return
 
-	if selected_unit != null and attackable_cells.has(unit.grid_position):
-		_attack(selected_unit, unit)
+	if selected_unit != null and action_mode == ActionMode.ATTACK and attackable_cells.has(unit.grid_position):
+		await _attack(selected_unit, unit)
 		_refresh_selection_after_action()
+		return
+
+	if unit.team == "enemy":
+		_inspect_enemy_movement(unit)
 
 
 # 选中一个玩家单位，并刷新它的移动范围和攻击范围。
@@ -123,10 +488,22 @@ func _select_unit(unit: BattleUnit) -> void:
 	_clear_selection()
 	selected_unit = unit
 	selected_unit.set_selected(true)
-	reachable_cells = _find_reachable_cells(unit)
-	attackable_cells = _find_attack_cells(unit.grid_position, unit.attack_range, true)
+	action_mode = ActionMode.MOVE
+	reachable_cells.clear()
+	attackable_cells.clear()
 	board.set_highlights(reachable_cells, attackable_cells)
-	_show_info("%s selected. Blue: move, red: attack." % unit.unit_name)
+	_show_action_menu(unit)
+	_show_info("已选择 %s：请从菜单选择行动。" % unit.unit_name)
+
+
+# 玩家回合点击敌方单位时，预览它下回合可能的移动范围。
+# 这不会消耗行动，也不会选中敌人。
+func _inspect_enemy_movement(unit: BattleUnit) -> void:
+	_clear_selection()
+	reachable_cells = _find_reachable_cells(unit, false)
+	attackable_cells.clear()
+	board.set_highlights(reachable_cells, attackable_cells)
+	_show_info("正在查看 %s 的下回合移动范围。" % unit.unit_name)
 
 
 # 清除当前选中单位和棋盘高亮。
@@ -135,9 +512,11 @@ func _clear_selection() -> void:
 	if selected_unit != null:
 		selected_unit.set_selected(false)
 	selected_unit = null
+	action_mode = ActionMode.MOVE
 	reachable_cells.clear()
 	attackable_cells.clear()
 	board.clear_highlights()
+	action_menu.visible = false
 
 
 # 单位移动或攻击后刷新选择状态。
@@ -160,6 +539,7 @@ func _refresh_selection_after_action() -> void:
 func _move_unit(unit: BattleUnit, target_cell: Vector2i) -> void:
 	unit.grid_position = target_cell
 	unit.has_moved = true
+	unit.play_move_animation(0.18)
 	var tween := create_tween()
 	tween.tween_property(unit, "position", Vector2(target_cell) * board.cell_size + Vector2(board.cell_size, board.cell_size) * 0.5, 0.18).set_trans(Tween.TRANS_SINE)
 	await tween.finished
@@ -172,13 +552,19 @@ func _move_unit(unit: BattleUnit, target_cell: Vector2i) -> void:
 # 参数 attacker 是攻击者；defender 是受击者。
 # 当前规则：攻击后攻击者本回合行动结束；目标血量为 0 时从战场移除。
 func _attack(attacker: BattleUnit, defender: BattleUnit) -> void:
-	defender.take_damage(attacker.attack_power)
+	await attacker.play_attack_animation(defender.position)
+	var defender_defeated := defender.take_damage(attacker.attack_power)
 	attacker.has_acted = true
 	_show_info("%s attacks %s for %d damage." % [attacker.unit_name, defender.unit_name, attacker.attack_power])
 
-	if defender.hp <= 0:
+	if defender_defeated:
+		await defender.play_hit_animation()
+		await defender.play_defeat_animation()
+		await defender.play_death_animation()
 		units.erase(defender)
 		defender.queue_free()
+	else:
+		await defender.play_hit_animation()
 
 
 # 玩家点击“End Turn”按钮时调用。
@@ -211,7 +597,7 @@ func _run_enemy_turn() -> void:
 			break
 
 		if _distance(enemy.grid_position, target.grid_position) <= enemy.attack_range:
-			_attack(enemy, target)
+			await _attack(enemy, target)
 			_check_battle_end()
 			await get_tree().create_timer(0.25).timeout
 			continue
@@ -221,7 +607,7 @@ func _run_enemy_turn() -> void:
 			await _move_unit(enemy, next_cell)
 
 		if is_instance_valid(target) and _distance(enemy.grid_position, target.grid_position) <= enemy.attack_range:
-			_attack(enemy, target)
+			await _attack(enemy, target)
 
 		_check_battle_end()
 		await get_tree().create_timer(0.25).timeout
@@ -232,6 +618,7 @@ func _run_enemy_turn() -> void:
 func _start_player_turn() -> void:
 	for unit in units:
 		if unit.team == "player":
+			unit.tick_skill_cooldown()
 			unit.reset_turn()
 	phase = Phase.PLAYER_TURN
 	_show_info("Player turn. Select a unit.")
@@ -258,9 +645,9 @@ func _check_battle_end() -> void:
 
 # 计算单位当前能移动到哪些格子。
 # 返回值是格子坐标数组，不包含起点、不包含障碍格、不包含已有单位的格子。
-func _find_reachable_cells(unit: BattleUnit) -> Array[Vector2i]:
+func _find_reachable_cells(unit: BattleUnit, respect_moved := true) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
-	if unit.has_moved:
+	if respect_moved and unit.has_moved:
 		return result
 
 	var frontier: Array[Vector2i] = [unit.grid_position]
