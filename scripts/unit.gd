@@ -35,6 +35,21 @@ signal selected(unit: BattleUnit)
 # 1 表示只能攻击上下左右相邻格；2 表示可以打到两格远。
 @export var attack_range := 1
 
+# 初始化时记录的基础属性。等级和装备都会叠加在这些基础值之上。
+var base_max_hp := 10
+var base_attack_power := 4
+var base_move_range := 3
+var base_attack_range := 1
+
+# 战内成长。当前版本每一关开始都会重置等级和经验。
+var level := 1
+var xp := 0
+var xp_to_next_level := 30
+var max_level := 5
+
+# 单装备槽。装备使用字典，字段由 game.gd 的 EQUIPMENT_POOL 提供。
+var equipped_item: Dictionary = {}
+
 # 技能当前剩余冷却回合数。
 # 为 0 时可以释放技能；释放后由 Game 脚本设置成职业对应冷却。
 var skill_cooldown_remaining := 0
@@ -82,10 +97,12 @@ func setup(data: Dictionary, new_cell_size: int) -> void:
 	unit_name = data.get("name", unit_name)
 	team = data.get("team", team)
 	grid_position = data.get("grid_position", grid_position)
-	max_hp = data.get("max_hp", max_hp)
-	attack_power = data.get("attack_power", attack_power)
-	move_range = data.get("move_range", move_range)
-	attack_range = data.get("attack_range", attack_range)
+	base_max_hp = data.get("max_hp", max_hp)
+	base_attack_power = data.get("attack_power", attack_power)
+	base_move_range = data.get("move_range", move_range)
+	base_attack_range = data.get("attack_range", attack_range)
+	max_level = data.get("max_level", max_level)
+	reset_progression_for_level()
 	hp = max_hp
 	cell_size = new_cell_size
 	position = Vector2(grid_position) * cell_size + Vector2(cell_size, cell_size) * 0.5
@@ -130,6 +147,99 @@ func heal(amount: int) -> int:
 	hp = min(hp + amount, max_hp)
 	queue_redraw()
 	return hp - old_hp
+
+
+# 关卡开始或重试时重置战内成长，但不移除装备。
+func reset_progression_for_level() -> void:
+	level = 1
+	xp = 0
+	xp_to_next_level = _xp_threshold_for_level(level)
+	skill_cooldown_remaining = 0
+	has_moved = false
+	has_acted = false
+	is_defending = false
+	_recalculate_stats(false)
+	hp = max_hp
+	queue_redraw()
+
+
+# 获得经验并返回本次升到的等级列表。
+func gain_xp(amount: int) -> Array[int]:
+	var gained_levels: Array[int] = []
+	if amount <= 0 or level >= max_level:
+		return gained_levels
+
+	xp += amount
+	while level < max_level and xp >= xp_to_next_level:
+		xp -= xp_to_next_level
+		level += 1
+		gained_levels.append(level)
+		xp_to_next_level = _xp_threshold_for_level(level)
+		_recalculate_stats(true)
+
+	if level >= max_level:
+		xp = 0
+		xp_to_next_level = 0
+	queue_redraw()
+	return gained_levels
+
+
+func equip_item(item: Dictionary) -> void:
+	equipped_item = item.duplicate(true)
+	_recalculate_stats(true)
+	queue_redraw()
+
+
+func unequip_item() -> Dictionary:
+	var removed := equipped_item.duplicate(true)
+	equipped_item.clear()
+	_recalculate_stats(false)
+	queue_redraw()
+	return removed
+
+
+func get_equipment_summary() -> String:
+	if equipped_item.is_empty():
+		return "None"
+	var rarity := String(equipped_item.get("rarity", "Common"))
+	var item_name := String(equipped_item.get("name", "Unknown"))
+	var stat_text := _equipment_bonus_text(equipped_item)
+	return "%s [%s]%s" % [item_name, rarity, "" if stat_text == "" else " " + stat_text]
+
+
+func _recalculate_stats(restore_growth: bool) -> void:
+	var old_max_hp := max_hp
+	var level_hp_bonus := (level - 1) * 2
+	var level_attack_bonus := level - 1
+	var level_move_bonus := int(level / 3)
+	var stat_mods := equipped_item.get("stat_mods", {}) as Dictionary
+
+	max_hp = maxi(1, base_max_hp + level_hp_bonus + int(stat_mods.get("max_hp", 0)))
+	attack_power = maxi(1, base_attack_power + level_attack_bonus + int(stat_mods.get("attack_power", 0)))
+	move_range = maxi(1, base_move_range + level_move_bonus + int(stat_mods.get("move_range", 0)))
+	attack_range = maxi(1, base_attack_range + int(stat_mods.get("attack_range", 0)))
+
+	if restore_growth and old_max_hp > 0 and max_hp > old_max_hp:
+		hp += max_hp - old_max_hp
+	hp = clampi(hp, 0, max_hp)
+
+
+func _xp_threshold_for_level(value: int) -> int:
+	return 30 + (value - 1) * 15
+
+
+func _equipment_bonus_text(item: Dictionary) -> String:
+	var stat_mods := item.get("stat_mods", {}) as Dictionary
+	var parts: Array[String] = []
+	if int(stat_mods.get("max_hp", 0)) != 0:
+		parts.append("HP %+d" % int(stat_mods.get("max_hp", 0)))
+	if int(stat_mods.get("attack_power", 0)) != 0:
+		parts.append("ATK %+d" % int(stat_mods.get("attack_power", 0)))
+	if int(stat_mods.get("move_range", 0)) != 0:
+		parts.append("MOV %+d" % int(stat_mods.get("move_range", 0)))
+	if int(stat_mods.get("attack_range", 0)) != 0:
+		parts.append("RNG %+d" % int(stat_mods.get("attack_range", 0)))
+	return ", ".join(parts)
 
 
 # 进入防守状态并消耗本回合行动。

@@ -740,3 +740,137 @@ E:\godot\Godot_v4.6.2-stable_win64_console.exe --path E:\myindiegames\gamedemo1 
 3. 把 `EffectLayer` 独立成 `scripts/effect_layer.gd`，让 `game.gd` 只负责调用接口。
 4. 增加外部关卡数据文件，至少支持读取一个正式关卡配置。
 5. 做一次人工战斗回归，重点观察 UI 遮挡、敌方回合是否卡住、结算面板是否阻止继续误操作。
+
+## 主代理第三批三轮商业化改进留痕
+
+### 执行日期
+
+2026-05-06
+
+### 主代理目标
+
+继续作为主代理按用户指定顺序推进第 7 到第 9 轮优化：先补战内经验与升级，再补单装备槽和关卡装备掉落，最后补齐“关卡开始面板 -> 战斗 -> 胜负结算 -> 下一关/重试”的完整闭环。经验成长只在单关内生效；装备和背包在本次运行的关卡之间保留。
+
+### 子代理分工
+
+| 角色 | 本轮职责 | 输出摘要 | 是否完成 |
+| --- | --- | --- | --- |
+| 协调策划 Agent | 固定三轮顺序、数值和验收标准 | 确认 XP 来源、升级曲线、单装备槽、掉落和两关闭环 | 完成 |
+| 美术资源 Agent | 装备图标资源规格 | 确认 `assets/generated/equipment/` 使用 64x64 透明 PNG 占位，后续可替换正式图标 | 完成 |
+| 程序开发 Agent | 由主代理直接实现 Godot/GDScript 改动 | 修改 `scripts/unit.gd`、`scripts/game.gd`，新增装备图标占位资源 | 完成 |
+| 测试文档 Agent | 校验脚本、短启动和回归风险 | 执行 Godot 脚本检查与主场景短启动，更新 README 和本留痕 | 完成 |
+
+### 第 7 轮：战内经验与升级系统
+
+目标：让单位在战斗中获得成长反馈，提高单关战斗的中长期决策感。
+
+修改文件：
+
+| 文件 | 修改类型 | 说明 |
+| --- | --- | --- |
+| `scripts/unit.gd` | 成长数据 | 新增 `level`、`xp`、`xp_to_next_level`、`max_level` |
+| `scripts/unit.gd` | 属性计算 | 新增基础属性字段，并通过 `_recalculate_stats()` 统一计算等级和装备加成 |
+| `scripts/game.gd` | 经验发放 | 普攻、击败、技能命中、治疗、防御都会给我方单位 XP |
+| `scripts/game.gd` | UI 反馈 | 单位信息面板显示等级和经验，升级显示 `Level Up!` 浮字 |
+
+规则摘要：
+
+- 初始 1 级，最高 5 级。
+- 升级所需经验为 `30 + (level - 1) * 15`。
+- 每级提升 `max_hp +2`、`attack_power +1`。
+- 等级 3 时额外提升 `move_range +1`。
+- 普攻命中 `+8 XP`，击败额外 `+20 XP`。
+- 技能命中每个敌人 `+6 XP`，技能击败额外 `+20 XP`。
+- 治疗实际恢复时每个目标 `+6 XP`，单次最多 `+18 XP`。
+- 防御 `+4 XP`。
+
+验收重点：
+
+- XP 只给玩家单位。
+- 升级后伤害预览和实际伤害使用新攻击力。
+- 重试或进入下一关时经验等级重置，装备保留。
+
+### 第 8 轮：装备系统与关卡掉落
+
+目标：加入单装备槽、装备掉落和奖励展示，让关卡胜利有可见收益。
+
+修改文件：
+
+| 文件 | 修改类型 | 说明 |
+| --- | --- | --- |
+| `scripts/unit.gd` | 装备系统 | 新增 `equipped_item`、`equip_item()`、`unequip_item()`、`get_equipment_summary()` |
+| `scripts/game.gd` | 装备配置 | 新增 `EQUIPMENT_POOL`，包含 4 件装备 |
+| `scripts/game.gd` | 掉落逻辑 | 第一关敌人死亡时记录掉落，进入 `party_inventory` 和 `pending_rewards` |
+| `assets/generated/equipment/*.png` | 占位图标 | 新增 4 张 64x64 装备占位 PNG |
+
+装备清单：
+
+| 装备 | 稀有度 | 推荐角色 | 加成 | 掉落来源 |
+| --- | --- | --- | --- | --- |
+| Iron Crest | Common | Warrior | `max_hp +3` | Goblin |
+| Hunter Charm | Common | Ranger | `attack_power +1` | Werewolf |
+| Ember Ring | Rare | Mage | `attack_power +1`, `max_hp +1` | Necromancer |
+| Blood Brooch | Rare | Cleric | `max_hp +2`, `attack_power +1` | Vampire |
+
+验收重点：
+
+- 敌人死亡后掉落不会打断死亡动画和胜负检查。
+- 推荐角色存活且空槽时自动装备。
+- 推荐角色已有装备时留在背包。
+- 单位信息面板显示装备摘要。
+- 缺失正式美术时占位图标路径稳定。
+
+### 第 9 轮：关卡开始到结算闭环
+
+目标：把单场战斗推进为可连续游玩的关卡流程。
+
+修改文件：
+
+| 文件 | 修改类型 | 说明 |
+| --- | --- | --- |
+| `scripts/game.gd` | 阶段流转 | 新增 `Phase.LEVEL_START` |
+| `scripts/game.gd` | 关卡数据 | 新增 `LEVEL_CONFIGS`，包含 `Riverside Breakthrough` 和 `Moonlit Ford` |
+| `scripts/game.gd` | 开始面板 | 新增动态 `StartPanel` 和 `Start Battle` 按钮 |
+| `scripts/game.gd` | 结算按钮 | `ResultPanel` 新增 `Next Level` 和 `Retry` |
+
+流程摘要：
+
+1. `_load_level(index)` 清理旧单位、旧高亮和旧特效。
+2. 生成当前关卡单位，玩家单位继承已装备物品。
+3. 进入 `Phase.LEVEL_START`，显示开始面板并锁住战场输入。
+4. 点击 `Start Battle` 后进入玩家回合。
+5. 胜利时显示奖励、升级、背包和 `Next Level`。
+6. 失败时显示失败原因和 `Retry`。
+7. `Retry` 重载当前关卡；`Next Level` 加载下一关。
+
+验收重点：
+
+- 开始面板期间不能操作棋盘或结束回合。
+- 胜利后能进入下一关。
+- 失败后能重试当前关。
+- 重试不会残留旧单位、旧高亮、旧浮字或旧回合数。
+- 下一关装备保留，经验等级重置。
+
+### 本批执行过的校验命令
+
+| 命令 | 结果 | 备注 |
+| --- | --- | --- |
+| `E:\godot\Godot_v4.6.2-stable_win64_console.exe --path E:\myindiegames\gamedemo1 --check-only --script res://scripts/unit.gd` | 通过 | 无解析错误 |
+| `E:\godot\Godot_v4.6.2-stable_win64_console.exe --path E:\myindiegames\gamedemo1 --check-only --script res://scripts/game.gd` | 通过 | 修复了 `const` 数组拼接导致的解析错误后通过 |
+| `E:\godot\Godot_v4.6.2-stable_win64_console.exe --path E:\myindiegames\gamedemo1 --check-only --script res://scripts/grid_board.gd` | 通过 | 无解析错误 |
+| `E:\godot\Godot_v4.6.2-stable_win64_console.exe --path E:\myindiegames\gamedemo1 --scene res://scenes/main.tscn --quit-after 5` | 通过 | 主场景短启动正常 |
+
+### 未覆盖风险
+
+- 还没有做完整人工通关，所以 `Next Level` 和 `Retry` 的真实点击体验需要继续实机验证。
+- 装备目前自动装备，没有手动装备/卸下菜单。
+- 装备图标是占位 PNG，不是最终商业美术。
+- 关卡、装备和掉落仍在 `game.gd` 中硬编码，后续应迁移到外部数据资源。
+
+### 下一轮建议
+
+1. 增加手动装备界面，让玩家在关卡开始面板里调整单装备槽。
+2. 把 `LEVEL_CONFIGS` 和 `EQUIPMENT_POOL` 迁移到 JSON 或 Godot Resource。
+3. 做完整人工通关测试，重点观察开局面板、掉落自动装备、胜利下一关、失败重试。
+4. 用正式美术替换 `assets/generated/equipment/` 下的占位图标。
+5. 增加第三关，验证装备跨关成长是否形成足够策略感。

@@ -5,8 +5,9 @@ extends Node2D
 # 战斗当前处于哪个阶段。
 # PLAYER_TURN：玩家可以选择单位、移动和攻击。
 # ENEMY_TURN：敌方 AI 自动行动，玩家输入会被忽略。
+# LEVEL_START：关卡说明面板显示中，战场输入被锁住。
 # VICTORY / DEFEAT：战斗结束，按钮和输入不再推进回合。
-enum Phase { PLAYER_TURN, ENEMY_TURN, VICTORY, DEFEAT }
+enum Phase { LEVEL_START, PLAYER_TURN, ENEMY_TURN, VICTORY, DEFEAT }
 
 # 玩家选中单位后的操作模式。
 # MOVE：默认移动模式，可以点击蓝色格移动。
@@ -24,20 +25,78 @@ const CAMERA_MARGIN := 32.0
 const UI_TOP_RESERVED := 80.0
 const MIN_CAMERA_ZOOM := 0.65
 const MAX_CAMERA_ZOOM := 1.8
-const MAX_TURNS := 8
-const PROTECTED_UNIT_NAME := "Cleric"
-const LEVEL_NAME := "Riverside Breakthrough"
-const DEFAULT_UNIT_DATA := [
-	{"name": "Warrior", "team": "player", "grid_position": Vector2i(1, 1), "max_hp": 16, "attack_power": 5, "move_range": 3},
-	{"name": "Mage", "team": "player", "grid_position": Vector2i(1, 3), "max_hp": 9, "attack_power": 6, "move_range": 3, "attack_range": 2},
-	{"name": "Ranger", "team": "player", "grid_position": Vector2i(1, 5), "max_hp": 11, "attack_power": 4, "move_range": 4, "attack_range": 2},
-	{"name": "Cleric", "team": "player", "grid_position": Vector2i(2, 6), "max_hp": 12, "attack_power": 3, "move_range": 3},
-	{"name": "Werewolf", "team": "enemy", "grid_position": Vector2i(8, 1), "max_hp": 14, "attack_power": 5, "move_range": 4},
-	{"name": "Goblin", "team": "enemy", "grid_position": Vector2i(8, 3), "max_hp": 9, "attack_power": 3, "move_range": 3},
-	{"name": "Necromancer", "team": "enemy", "grid_position": Vector2i(7, 5), "max_hp": 10, "attack_power": 5, "move_range": 2, "attack_range": 2},
-	{"name": "Vampire", "team": "enemy", "grid_position": Vector2i(8, 6), "max_hp": 13, "attack_power": 4, "move_range": 3},
+const EQUIPMENT_POOL := {
+	"iron_crest": {
+		"id": "iron_crest",
+		"name": "Iron Crest",
+		"rarity": "Common",
+		"preferred_unit": "Warrior",
+		"icon_path": "res://assets/generated/equipment/iron_crest.png",
+		"stat_mods": {"max_hp": 3},
+		"description": "A battered crest that helps the front line hold."
+	},
+	"hunter_charm": {
+		"id": "hunter_charm",
+		"name": "Hunter Charm",
+		"rarity": "Common",
+		"preferred_unit": "Ranger",
+		"icon_path": "res://assets/generated/equipment/hunter_charm.png",
+		"stat_mods": {"attack_power": 1},
+		"description": "A quiet charm for steadier shots."
+	},
+	"ember_ring": {
+		"id": "ember_ring",
+		"name": "Ember Ring",
+		"rarity": "Rare",
+		"preferred_unit": "Mage",
+		"icon_path": "res://assets/generated/equipment/ember_ring.png",
+		"stat_mods": {"attack_power": 1, "max_hp": 1},
+		"description": "A warm ring with a stubborn inner flame."
+	},
+	"blood_brooch": {
+		"id": "blood_brooch",
+		"name": "Blood Brooch",
+		"rarity": "Rare",
+		"preferred_unit": "Cleric",
+		"icon_path": "res://assets/generated/equipment/blood_brooch.png",
+		"stat_mods": {"max_hp": 2, "attack_power": 1},
+		"description": "A protective brooch polished to a dark shine."
+	},
+}
+const LEVEL_CONFIGS := [
+	{
+		"name": "Riverside Breakthrough",
+		"max_turns": 8,
+		"protected_unit": "Cleric",
+		"objective": "Defeat all enemies before the river line collapses.",
+		"units": [
+			{"name": "Warrior", "team": "player", "grid_position": Vector2i(1, 1), "max_hp": 16, "attack_power": 5, "move_range": 3},
+			{"name": "Mage", "team": "player", "grid_position": Vector2i(1, 3), "max_hp": 9, "attack_power": 6, "move_range": 3, "attack_range": 2},
+			{"name": "Ranger", "team": "player", "grid_position": Vector2i(1, 5), "max_hp": 11, "attack_power": 4, "move_range": 4, "attack_range": 2},
+			{"name": "Cleric", "team": "player", "grid_position": Vector2i(2, 6), "max_hp": 12, "attack_power": 3, "move_range": 3},
+			{"name": "Werewolf", "team": "enemy", "grid_position": Vector2i(8, 1), "max_hp": 14, "attack_power": 5, "move_range": 4, "drop_item_id": "hunter_charm"},
+			{"name": "Goblin", "team": "enemy", "grid_position": Vector2i(8, 3), "max_hp": 9, "attack_power": 3, "move_range": 3, "drop_item_id": "iron_crest"},
+			{"name": "Necromancer", "team": "enemy", "grid_position": Vector2i(7, 5), "max_hp": 10, "attack_power": 5, "move_range": 2, "attack_range": 2, "drop_item_id": "ember_ring"},
+			{"name": "Vampire", "team": "enemy", "grid_position": Vector2i(8, 6), "max_hp": 13, "attack_power": 4, "move_range": 3, "drop_item_id": "blood_brooch"},
+		],
+	},
+	{
+		"name": "Moonlit Ford",
+		"max_turns": 9,
+		"protected_unit": "Cleric",
+		"objective": "Cross the ford and break the night patrol.",
+		"units": [
+			{"name": "Warrior", "team": "player", "grid_position": Vector2i(1, 1), "max_hp": 16, "attack_power": 5, "move_range": 3},
+			{"name": "Mage", "team": "player", "grid_position": Vector2i(1, 3), "max_hp": 9, "attack_power": 6, "move_range": 3, "attack_range": 2},
+			{"name": "Ranger", "team": "player", "grid_position": Vector2i(1, 5), "max_hp": 11, "attack_power": 4, "move_range": 4, "attack_range": 2},
+			{"name": "Cleric", "team": "player", "grid_position": Vector2i(2, 6), "max_hp": 12, "attack_power": 3, "move_range": 3},
+			{"name": "Werewolf", "team": "enemy", "grid_position": Vector2i(7, 1), "max_hp": 16, "attack_power": 6, "move_range": 4},
+			{"name": "Goblin", "team": "enemy", "grid_position": Vector2i(8, 2), "max_hp": 11, "attack_power": 4, "move_range": 3},
+			{"name": "Necromancer", "team": "enemy", "grid_position": Vector2i(8, 5), "max_hp": 12, "attack_power": 6, "move_range": 2, "attack_range": 2},
+			{"name": "Vampire", "team": "enemy", "grid_position": Vector2i(7, 6), "max_hp": 15, "attack_power": 5, "move_range": 3},
+		],
+	},
 ]
-
 # 各职业技能参数。
 const SKILL_COOLDOWNS := {
 	"warrior": 2,
@@ -83,15 +142,25 @@ const DIRECTIONS := [
 # 窗口大小变化时会自动调整 zoom，让整张棋盘尽量完整显示。
 @onready var camera: Camera2D = $Camera2D
 
-# 当前战斗阶段，默认从玩家回合开始。
-var phase := Phase.PLAYER_TURN
+# 当前战斗阶段，默认从关卡开始说明进入。
+var phase := Phase.LEVEL_START
+var current_level_index := 0
 var current_turn := 1
 var battle_result_reason := ""
 var defeated_unit_names: Array[String] = []
+var party_inventory: Array[Dictionary] = []
+var pending_rewards: Array[String] = []
+var level_progress_summary: Array[String] = []
+var enemy_drop_by_name := {}
 var unit_info_panel: PanelContainer
 var unit_info_label: Label
+var start_panel: PanelContainer
+var start_label: Label
+var start_button: Button
 var result_panel: PanelContainer
 var result_label: Label
+var next_level_button: Button
+var retry_button: Button
 var effect_root: Node2D
 
 # 当前被玩家选中的单位。没有选中任何单位时为 null。
@@ -126,11 +195,7 @@ func _ready() -> void:
 	_style_end_turn_button()
 	_build_battle_ui()
 	_build_effect_layer()
-	_spawn_default_units()
-	_show_info("选择我方单位开始行动。")
-	_update_ui()
-	_show_info(_mission_brief())
-	_show_unit_info(null)
+	_load_level(0)
 	_fit_camera_to_viewport.call_deferred()
 
 
@@ -156,15 +221,51 @@ func _unhandled_input(event: InputEvent) -> void:
 			_refresh_selection_after_action()
 
 
-# 生成一组演示用单位。
-# 后续做关卡系统时，可以把这份数据改成从关卡资源、JSON 或 TileMap 标记里读取。
+# 生成当前关卡的单位。玩家单位会继承本次运行中已经获得的装备。
 func _spawn_default_units() -> void:
-	for data in DEFAULT_UNIT_DATA:
+	for data in _current_unit_data():
 		var unit := UNIT_SCENE.instantiate() as BattleUnit
 		units_root.add_child(unit)
 		unit.setup(data, board.cell_size)
+		if unit.team == "player":
+			var saved_item := _equipped_item_for_unit(unit.unit_name)
+			if not saved_item.is_empty():
+				unit.equip_item(saved_item)
+		elif data.has("drop_item_id"):
+			enemy_drop_by_name[unit.unit_name] = String(data.get("drop_item_id"))
 		unit.selected.connect(_on_unit_selected)
 		units.append(unit)
+
+
+func _load_level(index: int) -> void:
+	current_level_index = clampi(index, 0, LEVEL_CONFIGS.size() - 1)
+	_clear_board_units()
+	_clear_selection()
+	_hide_result_panel()
+	if start_panel != null:
+		start_panel.visible = true
+	current_turn = 1
+	battle_result_reason = ""
+	defeated_unit_names.clear()
+	pending_rewards.clear()
+	level_progress_summary.clear()
+	enemy_drop_by_name.clear()
+	phase = Phase.LEVEL_START
+	_spawn_default_units()
+	_show_info(_mission_brief())
+	_show_unit_info(null)
+	_show_start_panel()
+	_update_ui()
+
+
+func _clear_board_units() -> void:
+	units.clear()
+	for child in units_root.get_children():
+		child.queue_free()
+	if effect_root != null:
+		for child in effect_root.get_children():
+			child.queue_free()
+	board.clear_highlights()
 
 
 # 给结束回合按钮加上生成的 UI 图片。
@@ -202,14 +303,51 @@ func _build_battle_ui() -> void:
 	unit_info_label.text = ""
 	info_margin.add_child(unit_info_label)
 
+	start_panel = PanelContainer.new()
+	start_panel.name = "StartPanel"
+	start_panel.custom_minimum_size = Vector2(500.0, 250.0)
+	start_panel.offset_left = 210.0
+	start_panel.offset_top = 150.0
+	start_panel.offset_right = 710.0
+	start_panel.offset_bottom = 400.0
+	var start_style := StyleBoxFlat.new()
+	start_style.bg_color = Color(0.035, 0.045, 0.06, 0.94)
+	start_style.border_color = Color(0.42, 0.64, 0.86, 1.0)
+	start_style.set_border_width_all(3)
+	start_style.set_corner_radius_all(8)
+	start_panel.add_theme_stylebox_override("panel", start_style)
+	ui_root.add_child(start_panel)
+
+	var start_margin := MarginContainer.new()
+	start_margin.add_theme_constant_override("margin_left", 20)
+	start_margin.add_theme_constant_override("margin_top", 16)
+	start_margin.add_theme_constant_override("margin_right", 20)
+	start_margin.add_theme_constant_override("margin_bottom", 16)
+	start_panel.add_child(start_margin)
+
+	var start_box := VBoxContainer.new()
+	start_box.add_theme_constant_override("separation", 12)
+	start_margin.add_child(start_box)
+
+	start_label = Label.new()
+	start_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	start_label.text = ""
+	start_box.add_child(start_label)
+
+	start_button = Button.new()
+	start_button.text = "Start Battle"
+	start_button.custom_minimum_size = Vector2(180.0, 42.0)
+	start_button.pressed.connect(_on_start_battle_pressed)
+	start_box.add_child(start_button)
+
 	result_panel = PanelContainer.new()
 	result_panel.name = "ResultPanel"
 	result_panel.visible = false
-	result_panel.custom_minimum_size = Vector2(420.0, 210.0)
-	result_panel.offset_left = 250.0
-	result_panel.offset_top = 180.0
-	result_panel.offset_right = 670.0
-	result_panel.offset_bottom = 390.0
+	result_panel.custom_minimum_size = Vector2(460.0, 270.0)
+	result_panel.offset_left = 230.0
+	result_panel.offset_top = 150.0
+	result_panel.offset_right = 690.0
+	result_panel.offset_bottom = 420.0
 	var result_style := StyleBoxFlat.new()
 	result_style.bg_color = Color(0.04, 0.045, 0.055, 0.92)
 	result_style.border_color = Color(0.86, 0.68, 0.32, 1.0)
@@ -225,10 +363,30 @@ func _build_battle_ui() -> void:
 	result_margin.add_theme_constant_override("margin_bottom", 14)
 	result_panel.add_child(result_margin)
 
+	var result_box := VBoxContainer.new()
+	result_box.add_theme_constant_override("separation", 10)
+	result_margin.add_child(result_box)
+
 	result_label = Label.new()
 	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	result_label.text = ""
-	result_margin.add_child(result_label)
+	result_box.add_child(result_label)
+
+	var result_buttons := HBoxContainer.new()
+	result_buttons.add_theme_constant_override("separation", 12)
+	result_box.add_child(result_buttons)
+
+	next_level_button = Button.new()
+	next_level_button.text = "Next Level"
+	next_level_button.custom_minimum_size = Vector2(140.0, 40.0)
+	next_level_button.pressed.connect(_on_next_level_pressed)
+	result_buttons.add_child(next_level_button)
+
+	retry_button = Button.new()
+	retry_button.text = "Retry"
+	retry_button.custom_minimum_size = Vector2(120.0, 40.0)
+	retry_button.pressed.connect(_on_retry_pressed)
+	result_buttons.add_child(retry_button)
 
 
 func _build_effect_layer() -> void:
@@ -330,6 +488,7 @@ func _on_defend_button_pressed() -> void:
 		return
 	await _play_defend_animation(selected_unit)
 	selected_unit.defend()
+	_award_xp(selected_unit, 4, "guard")
 	_show_info("%s 进入防守，下一次受到伤害减半。" % selected_unit.unit_name)
 	_refresh_selection_after_action()
 
@@ -349,6 +508,27 @@ func _on_skill_button_pressed() -> void:
 func _on_cancel_button_pressed() -> void:
 	_clear_selection()
 	_show_info("已取消选择。")
+
+
+func _on_start_battle_pressed() -> void:
+	if phase != Phase.LEVEL_START:
+		return
+	start_panel.visible = false
+	phase = Phase.PLAYER_TURN
+	_show_info("Player turn. %s" % _mission_brief())
+	_update_ui()
+
+
+func _on_next_level_pressed() -> void:
+	if phase != Phase.VICTORY:
+		return
+	if current_level_index + 1 >= LEVEL_CONFIGS.size():
+		return
+	_load_level(current_level_index + 1)
+
+
+func _on_retry_pressed() -> void:
+	_load_level(current_level_index)
 
 
 # 返回单位职业对应的技能 key。
@@ -453,10 +633,13 @@ func _damage_units_in_cells(caster: BattleUnit, cells: Array[Vector2i], multipli
 		await target.play_hit_animation()
 		var defeated := target.take_damage(damage)
 		_show_float_at_unit(target, "-%d" % target.last_damage_taken, Color("#ff6961"))
+		_award_xp(caster, 6, "skill hit")
 		if defeated:
 			await target.play_defeat_animation()
 			await target.play_death_animation()
 			defeated_unit_names.append(target.unit_name)
+			_award_xp(caster, 20, "skill defeat")
+			_collect_drop(target)
 			units.erase(target)
 			target.queue_free()
 
@@ -464,12 +647,16 @@ func _damage_units_in_cells(caster: BattleUnit, cells: Array[Vector2i], multipli
 # 对范围内所有友方回复 1/3 最大生命。
 func _heal_units_in_cells(caster: BattleUnit, cells: Array[Vector2i]) -> void:
 	var targets := _units_in_cells(cells, caster.team)
+	var healing_xp := 0
 	for target in targets:
 		var heal_amount := maxi(1, ceili(float(target.max_hp) / 3.0))
 		var healed := target.heal(heal_amount)
 		if healed > 0:
 			_show_float_at_unit(target, "+%d" % healed, Color("#6cff9a"))
+			healing_xp = mini(18, healing_xp + 6)
 		await _play_heal_animation(target)
+	if healing_xp > 0:
+		_award_xp(caster, healing_xp, "healing")
 
 
 # 从格子列表里筛出指定阵营单位。
@@ -660,12 +847,15 @@ func _attack(attacker: BattleUnit, defender: BattleUnit) -> int:
 	var damage_dealt := defender.last_damage_taken
 	_show_float_at_unit(defender, "-%d" % damage_dealt, Color("#ff6961"))
 	_show_info("%s attacks %s for %d damage." % [attacker.unit_name, defender.unit_name, attacker.attack_power])
+	_award_xp(attacker, 8, "hit")
 
 	if defender_defeated:
 		await defender.play_hit_animation()
 		await defender.play_defeat_animation()
 		await defender.play_death_animation()
 		defeated_unit_names.append(defender.unit_name)
+		_award_xp(attacker, 20, "defeat")
+		_collect_drop(defender)
 		units.erase(defender)
 		defender.queue_free()
 	else:
@@ -732,7 +922,7 @@ func _start_player_turn() -> void:
 			unit.tick_skill_cooldown()
 			unit.reset_turn()
 	phase = Phase.PLAYER_TURN
-	if current_turn > MAX_TURNS:
+	if current_turn > _max_turns():
 		phase = Phase.DEFEAT
 		battle_result_reason = "Turn limit exceeded."
 		_clear_selection()
@@ -763,7 +953,7 @@ func _check_battle_end() -> void:
 		_show_result_panel()
 	elif not _protected_unit_alive():
 		phase = Phase.DEFEAT
-		battle_result_reason = "%s was defeated." % PROTECTED_UNIT_NAME
+		battle_result_reason = "%s was defeated." % _protected_unit_name()
 		_clear_selection()
 		_show_info(_battle_summary())
 		_show_result_panel()
@@ -926,17 +1116,24 @@ func _show_unit_info(unit: BattleUnit) -> void:
 	if unit_info_label == null:
 		return
 	if unit == null or not is_instance_valid(unit):
-		unit_info_label.text = "%s\n\n%s\n\nSelect a unit to view stats." % [LEVEL_NAME, _mission_brief()]
+		unit_info_label.text = "%s\n\n%s\n\nInventory: %s\n\nSelect a unit to view stats." % [
+			_level_name(),
+			_mission_brief(),
+			_inventory_summary(),
+		]
 		return
 	var skill_line := _skill_preview_text(unit) if _skill_key(unit) != "" else "No skill"
-	unit_info_label.text = "%s\n%s\n\nHP: %d / %d\nATK: %d   MOV: %d   RNG: %d\nStatus: %s\nSkill: %s" % [
+	unit_info_label.text = "%s\n%s\n\nLv %d  XP: %s\nHP: %d / %d\nATK: %d   MOV: %d   RNG: %d\nEquip: %s\nStatus: %s\nSkill: %s" % [
 		"ALLY" if unit.team == "player" else "ENEMY",
 		unit.unit_name,
+		unit.level,
+		_xp_display(unit),
 		unit.hp,
 		unit.max_hp,
 		unit.attack_power,
 		unit.move_range,
 		unit.attack_range,
+		unit.get_equipment_summary(),
 		_unit_status(unit),
 		skill_line,
 	]
@@ -946,14 +1143,21 @@ func _show_result_panel() -> void:
 	if result_panel == null or result_label == null:
 		return
 	result_panel.visible = true
-	result_label.text = "%s\n\n%s\n\nGrade: %s\nTurns: %d / %d\nSurvivors: %d\nDefeated: %s" % [
+	if start_panel != null:
+		start_panel.visible = false
+	next_level_button.visible = phase == Phase.VICTORY and current_level_index + 1 < LEVEL_CONFIGS.size()
+	retry_button.visible = true
+	result_label.text = "%s\n\n%s\n\nGrade: %s\nTurns: %d / %d\nSurvivors: %d\nDefeated: %s\nRewards: %s\nGrowth: %s\nInventory: %s" % [
 		"VICTORY" if phase == Phase.VICTORY else "DEFEAT",
 		battle_result_reason,
 		_result_grade(),
 		current_turn,
-		MAX_TURNS,
+		_max_turns(),
 		units.filter(func(unit: BattleUnit) -> bool: return unit.team == "player").size(),
 		"none" if defeated_unit_names.is_empty() else ", ".join(defeated_unit_names),
+		"none" if pending_rewards.is_empty() else "\n- " + "\n- ".join(pending_rewards),
+		"none" if level_progress_summary.is_empty() else "\n- " + "\n- ".join(level_progress_summary),
+		_inventory_summary(),
 	]
 
 
@@ -965,11 +1169,14 @@ func _hide_result_panel() -> void:
 # 根据当前 phase 刷新回合文字和结束回合按钮状态。
 func _update_ui() -> void:
 	match phase:
+		Phase.LEVEL_START:
+			turn_label.text = "Level %d/%d - Briefing" % [current_level_index + 1, LEVEL_CONFIGS.size()]
+			end_turn_button.disabled = true
 		Phase.PLAYER_TURN:
-			turn_label.text = "Turn %d/%d - Player" % [current_turn, MAX_TURNS]
+			turn_label.text = "Turn %d/%d - Player" % [current_turn, _max_turns()]
 			end_turn_button.disabled = false
 		Phase.ENEMY_TURN:
-			turn_label.text = "Turn %d/%d - Enemy" % [current_turn, MAX_TURNS]
+			turn_label.text = "Turn %d/%d - Enemy" % [current_turn, _max_turns()]
 			end_turn_button.disabled = true
 		Phase.VICTORY:
 			turn_label.text = "Victory"
@@ -980,7 +1187,11 @@ func _update_ui() -> void:
 
 
 func _mission_brief() -> String:
-	return "Objective: defeat all enemies in %d turns. Protect %s." % [MAX_TURNS, PROTECTED_UNIT_NAME]
+	return "Objective: %s Defeat all enemies in %d turns. Protect %s." % [
+		String(_current_level().get("objective", "Clear the battlefield.")),
+		_max_turns(),
+		_protected_unit_name(),
+	]
 
 
 func _unit_summary(unit: BattleUnit) -> String:
@@ -1054,7 +1265,7 @@ func _skill_preview_text(unit: BattleUnit) -> String:
 
 func _protected_unit_alive() -> bool:
 	for unit in units:
-		if unit.team == "player" and unit.unit_name == PROTECTED_UNIT_NAME and unit.hp > 0:
+		if unit.team == "player" and unit.unit_name == _protected_unit_name() and unit.hp > 0:
 			return true
 	return false
 
@@ -1065,7 +1276,7 @@ func _battle_summary() -> String:
 	return "%s | Turns %d/%d | Survivors %d | Defeated: %s" % [
 		battle_result_reason,
 		current_turn,
-		MAX_TURNS,
+		_max_turns(),
 		surviving_players,
 		defeated_text,
 	]
@@ -1076,7 +1287,7 @@ func _result_grade() -> String:
 		return "C"
 	var player_losses := 0
 	for name in defeated_unit_names:
-		for data in DEFAULT_UNIT_DATA:
+		for data in _current_unit_data():
 			if String(data.get("name", "")) == name and String(data.get("team", "")) == "player":
 				player_losses += 1
 	if current_turn <= 6 and player_losses == 0:
@@ -1084,6 +1295,124 @@ func _result_grade() -> String:
 	if player_losses == 0:
 		return "A"
 	return "B"
+
+
+func _current_level() -> Dictionary:
+	return LEVEL_CONFIGS[current_level_index]
+
+
+func _current_unit_data() -> Array:
+	return _current_level().get("units", [])
+
+
+func _level_name() -> String:
+	return String(_current_level().get("name", "Untitled Level"))
+
+
+func _max_turns() -> int:
+	return int(_current_level().get("max_turns", 8))
+
+
+func _protected_unit_name() -> String:
+	return String(_current_level().get("protected_unit", "Cleric"))
+
+
+func _show_start_panel() -> void:
+	if start_panel == null or start_label == null:
+		return
+	start_panel.visible = true
+	start_label.text = "Level %d - %s\n\n%s\n\nParty\n%s\n\nEquipment\n%s" % [
+		current_level_index + 1,
+		_level_name(),
+		_mission_brief(),
+		_party_summary(),
+		_inventory_summary(),
+	]
+
+
+func _party_summary() -> String:
+	var lines: Array[String] = []
+	for unit in units:
+		if unit.team == "player":
+			lines.append("%s HP %d/%d ATK %d MOV %d RNG %d | %s" % [
+				unit.unit_name,
+				unit.hp,
+				unit.max_hp,
+				unit.attack_power,
+				unit.move_range,
+				unit.attack_range,
+				unit.get_equipment_summary(),
+			])
+	return "\n".join(lines)
+
+
+func _inventory_summary() -> String:
+	if party_inventory.is_empty():
+		return "empty"
+	var lines: Array[String] = []
+	for item in party_inventory:
+		var equipped_to := String(item.get("equipped_to", ""))
+		var suffix := "" if equipped_to == "" else " -> " + equipped_to
+		lines.append("%s%s" % [String(item.get("name", "Unknown")), suffix])
+	return ", ".join(lines)
+
+
+func _xp_display(unit: BattleUnit) -> String:
+	if unit.level >= unit.max_level:
+		return "MAX"
+	return "%d/%d" % [unit.xp, unit.xp_to_next_level]
+
+
+func _award_xp(unit: BattleUnit, amount: int, reason: String) -> void:
+	if unit == null or not is_instance_valid(unit) or unit.team != "player":
+		return
+	var gained_levels := unit.gain_xp(amount)
+	_show_float_at_unit(unit, "+%d XP" % amount, Color("#9fd3ff"))
+	for new_level in gained_levels:
+		var text := "%s reached Lv %d via %s." % [unit.unit_name, new_level, reason]
+		level_progress_summary.append(text)
+		_show_float_at_unit(unit, "Level Up!", Color("#ffe082"))
+	_show_unit_info(unit)
+
+
+func _collect_drop(defeated_unit: BattleUnit) -> void:
+	if defeated_unit == null or not is_instance_valid(defeated_unit):
+		return
+	var drop_id := String(enemy_drop_by_name.get(defeated_unit.unit_name, ""))
+	if drop_id == "" or not EQUIPMENT_POOL.has(drop_id):
+		return
+	var item := (EQUIPMENT_POOL[drop_id] as Dictionary).duplicate(true)
+	party_inventory.append(item)
+	var equip_note := _try_auto_equip_drop(item)
+	var reward_line := "%s dropped %s" % [defeated_unit.unit_name, String(item.get("name", "Unknown"))]
+	if equip_note != "":
+		reward_line += " (%s)" % equip_note
+	pending_rewards.append(reward_line)
+
+
+func _try_auto_equip_drop(item: Dictionary) -> String:
+	var preferred_unit := String(item.get("preferred_unit", ""))
+	var target := _find_player_unit_by_name(preferred_unit)
+	if target == null or not target.equipped_item.is_empty():
+		return "sent to inventory"
+	item["equipped_to"] = target.unit_name
+	target.equip_item(item)
+	_show_float_at_unit(target, "Equip: %s" % String(item.get("name", "Gear")), Color("#f4d06f"))
+	return "equipped to %s" % target.unit_name
+
+
+func _equipped_item_for_unit(unit_name: String) -> Dictionary:
+	for item in party_inventory:
+		if String(item.get("equipped_to", "")) == unit_name:
+			return item
+	return {}
+
+
+func _find_player_unit_by_name(unit_name: String) -> BattleUnit:
+	for unit in units:
+		if unit.team == "player" and unit.unit_name == unit_name and unit.hp > 0:
+			return unit
+	return null
 
 
 func _show_float_at_unit(unit: BattleUnit, text: String, color: Color) -> void:
