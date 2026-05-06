@@ -24,6 +24,19 @@ const CAMERA_MARGIN := 32.0
 const UI_TOP_RESERVED := 80.0
 const MIN_CAMERA_ZOOM := 0.65
 const MAX_CAMERA_ZOOM := 1.8
+const MAX_TURNS := 8
+const PROTECTED_UNIT_NAME := "Cleric"
+const LEVEL_NAME := "Riverside Breakthrough"
+const DEFAULT_UNIT_DATA := [
+	{"name": "Warrior", "team": "player", "grid_position": Vector2i(1, 1), "max_hp": 16, "attack_power": 5, "move_range": 3},
+	{"name": "Mage", "team": "player", "grid_position": Vector2i(1, 3), "max_hp": 9, "attack_power": 6, "move_range": 3, "attack_range": 2},
+	{"name": "Ranger", "team": "player", "grid_position": Vector2i(1, 5), "max_hp": 11, "attack_power": 4, "move_range": 4, "attack_range": 2},
+	{"name": "Cleric", "team": "player", "grid_position": Vector2i(2, 6), "max_hp": 12, "attack_power": 3, "move_range": 3},
+	{"name": "Werewolf", "team": "enemy", "grid_position": Vector2i(8, 1), "max_hp": 14, "attack_power": 5, "move_range": 4},
+	{"name": "Goblin", "team": "enemy", "grid_position": Vector2i(8, 3), "max_hp": 9, "attack_power": 3, "move_range": 3},
+	{"name": "Necromancer", "team": "enemy", "grid_position": Vector2i(7, 5), "max_hp": 10, "attack_power": 5, "move_range": 2, "attack_range": 2},
+	{"name": "Vampire", "team": "enemy", "grid_position": Vector2i(8, 6), "max_hp": 13, "attack_power": 4, "move_range": 3},
+]
 
 # 各职业技能参数。
 const SKILL_COOLDOWNS := {
@@ -64,6 +77,7 @@ const DIRECTIONS := [
 @onready var defend_button: Button = %DefendButton
 @onready var skill_button: Button = %SkillButton
 @onready var cancel_button: Button = %CancelButton
+@onready var ui_root: CanvasLayer = $UI
 
 # 负责显示战场的 2D 相机。
 # 窗口大小变化时会自动调整 zoom，让整张棋盘尽量完整显示。
@@ -71,6 +85,14 @@ const DIRECTIONS := [
 
 # 当前战斗阶段，默认从玩家回合开始。
 var phase := Phase.PLAYER_TURN
+var current_turn := 1
+var battle_result_reason := ""
+var defeated_unit_names: Array[String] = []
+var unit_info_panel: PanelContainer
+var unit_info_label: Label
+var result_panel: PanelContainer
+var result_label: Label
+var effect_root: Node2D
 
 # 当前被玩家选中的单位。没有选中任何单位时为 null。
 var selected_unit: BattleUnit
@@ -102,9 +124,13 @@ func _ready() -> void:
 	cancel_button.pressed.connect(_on_cancel_button_pressed)
 	get_viewport().size_changed.connect(_fit_camera_to_viewport)
 	_style_end_turn_button()
+	_build_battle_ui()
+	_build_effect_layer()
 	_spawn_default_units()
 	_show_info("选择我方单位开始行动。")
 	_update_ui()
+	_show_info(_mission_brief())
+	_show_unit_info(null)
 	_fit_camera_to_viewport.call_deferred()
 
 
@@ -133,18 +159,7 @@ func _unhandled_input(event: InputEvent) -> void:
 # 生成一组演示用单位。
 # 后续做关卡系统时，可以把这份数据改成从关卡资源、JSON 或 TileMap 标记里读取。
 func _spawn_default_units() -> void:
-	var unit_data := [
-		{"name": "Warrior", "team": "player", "grid_position": Vector2i(1, 1), "max_hp": 16, "attack_power": 5, "move_range": 3},
-		{"name": "Mage", "team": "player", "grid_position": Vector2i(1, 3), "max_hp": 9, "attack_power": 6, "move_range": 3, "attack_range": 2},
-		{"name": "Ranger", "team": "player", "grid_position": Vector2i(1, 5), "max_hp": 11, "attack_power": 4, "move_range": 4, "attack_range": 2},
-		{"name": "Cleric", "team": "player", "grid_position": Vector2i(2, 6), "max_hp": 12, "attack_power": 3, "move_range": 3},
-		{"name": "Werewolf", "team": "enemy", "grid_position": Vector2i(8, 1), "max_hp": 14, "attack_power": 5, "move_range": 4},
-		{"name": "Goblin", "team": "enemy", "grid_position": Vector2i(8, 3), "max_hp": 9, "attack_power": 3, "move_range": 3},
-		{"name": "Necromancer", "team": "enemy", "grid_position": Vector2i(7, 5), "max_hp": 10, "attack_power": 5, "move_range": 2, "attack_range": 2},
-		{"name": "Vampire", "team": "enemy", "grid_position": Vector2i(8, 6), "max_hp": 13, "attack_power": 4, "move_range": 3},
-	]
-
-	for data in unit_data:
+	for data in DEFAULT_UNIT_DATA:
 		var unit := UNIT_SCENE.instantiate() as BattleUnit
 		units_root.add_child(unit)
 		unit.setup(data, board.cell_size)
@@ -157,6 +172,69 @@ func _spawn_default_units() -> void:
 func _style_end_turn_button() -> void:
 	end_turn_button.icon = END_TURN_BUTTON_TEXTURE
 	end_turn_button.custom_minimum_size = Vector2(170.0, 48.0)
+
+
+func _build_battle_ui() -> void:
+	unit_info_panel = PanelContainer.new()
+	unit_info_panel.name = "UnitInfoPanel"
+	unit_info_panel.custom_minimum_size = Vector2(260.0, 160.0)
+	unit_info_panel.offset_left = 18.0
+	unit_info_panel.offset_top = 78.0
+	unit_info_panel.offset_right = 278.0
+	unit_info_panel.offset_bottom = 238.0
+	var info_style := StyleBoxFlat.new()
+	info_style.bg_color = Color(0.06, 0.075, 0.095, 0.84)
+	info_style.border_color = Color(0.48, 0.58, 0.72, 0.92)
+	info_style.set_border_width_all(2)
+	info_style.set_corner_radius_all(8)
+	unit_info_panel.add_theme_stylebox_override("panel", info_style)
+	ui_root.add_child(unit_info_panel)
+
+	var info_margin := MarginContainer.new()
+	info_margin.add_theme_constant_override("margin_left", 10)
+	info_margin.add_theme_constant_override("margin_top", 8)
+	info_margin.add_theme_constant_override("margin_right", 10)
+	info_margin.add_theme_constant_override("margin_bottom", 8)
+	unit_info_panel.add_child(info_margin)
+
+	unit_info_label = Label.new()
+	unit_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	unit_info_label.text = ""
+	info_margin.add_child(unit_info_label)
+
+	result_panel = PanelContainer.new()
+	result_panel.name = "ResultPanel"
+	result_panel.visible = false
+	result_panel.custom_minimum_size = Vector2(420.0, 210.0)
+	result_panel.offset_left = 250.0
+	result_panel.offset_top = 180.0
+	result_panel.offset_right = 670.0
+	result_panel.offset_bottom = 390.0
+	var result_style := StyleBoxFlat.new()
+	result_style.bg_color = Color(0.04, 0.045, 0.055, 0.92)
+	result_style.border_color = Color(0.86, 0.68, 0.32, 1.0)
+	result_style.set_border_width_all(3)
+	result_style.set_corner_radius_all(8)
+	result_panel.add_theme_stylebox_override("panel", result_style)
+	ui_root.add_child(result_panel)
+
+	var result_margin := MarginContainer.new()
+	result_margin.add_theme_constant_override("margin_left", 18)
+	result_margin.add_theme_constant_override("margin_top", 14)
+	result_margin.add_theme_constant_override("margin_right", 18)
+	result_margin.add_theme_constant_override("margin_bottom", 14)
+	result_panel.add_child(result_margin)
+
+	result_label = Label.new()
+	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	result_label.text = ""
+	result_margin.add_child(result_label)
+
+
+func _build_effect_layer() -> void:
+	effect_root = Node2D.new()
+	effect_root.name = "EffectLayer"
+	board.add_child(effect_root)
 
 
 # 根据窗口大小调整相机缩放。
@@ -198,8 +276,17 @@ func _show_action_menu(unit: BattleUnit) -> void:
 		skill_button.disabled = false
 		skill_button.text = "技能"
 
+	if skill_key == "":
+		skill_button.text = "Skill"
+	elif unit.skill_cooldown_remaining > 0:
+		skill_button.text = "CD %d" % unit.skill_cooldown_remaining
+	else:
+		skill_button.text = skill_name
+
 	action_menu.visible = true
 	_position_action_menu(unit)
+	_show_info.call_deferred(_unit_summary(unit))
+	_show_unit_info(unit)
 
 
 # 把操作菜单放在单位附近，并限制在窗口范围内。
@@ -253,6 +340,7 @@ func _on_skill_button_pressed() -> void:
 		return
 	action_mode = ActionMode.SKILL
 	action_menu.visible = false
+	_show_info("%s: %s" % [_skill_name(selected_unit), _skill_preview_text(selected_unit)])
 	await _execute_skill(selected_unit)
 	_refresh_selection_after_action()
 
@@ -364,9 +452,11 @@ func _damage_units_in_cells(caster: BattleUnit, cells: Array[Vector2i], multipli
 	for target in targets:
 		await target.play_hit_animation()
 		var defeated := target.take_damage(damage)
+		_show_float_at_unit(target, "-%d" % target.last_damage_taken, Color("#ff6961"))
 		if defeated:
 			await target.play_defeat_animation()
 			await target.play_death_animation()
+			defeated_unit_names.append(target.unit_name)
 			units.erase(target)
 			target.queue_free()
 
@@ -376,7 +466,9 @@ func _heal_units_in_cells(caster: BattleUnit, cells: Array[Vector2i]) -> void:
 	var targets := _units_in_cells(cells, caster.team)
 	for target in targets:
 		var heal_amount := maxi(1, ceili(float(target.max_hp) / 3.0))
-		target.heal(heal_amount)
+		var healed := target.heal(heal_amount)
+		if healed > 0:
+			_show_float_at_unit(target, "+%d" % healed, Color("#6cff9a"))
 		await _play_heal_animation(target)
 
 
@@ -454,6 +546,7 @@ func _play_heal_animation(target: BattleUnit) -> void:
 
 # 防守特效。
 func _play_defend_animation(unit: BattleUnit) -> void:
+	_show_float_at_unit(unit, "Guard", Color("#85a9ff"))
 	var tween := create_tween()
 	tween.tween_property(unit.sprite, "modulate", Color(0.55, 0.72, 1.0, 1.0), 0.1)
 	tween.parallel().tween_property(unit.sprite, "scale", Vector2(0.92, 1.08), 0.1)
@@ -471,16 +564,20 @@ func _on_unit_selected(unit: BattleUnit) -> void:
 	if unit.team == "player":
 		if unit.has_acted:
 			_show_info("%s has already acted." % unit.unit_name)
+			_show_unit_info(unit)
 			return
 		_select_unit(unit)
 		return
 
 	if selected_unit != null and action_mode == ActionMode.ATTACK and attackable_cells.has(unit.grid_position):
+		_show_info(_preview_attack_result(selected_unit, unit))
+		_show_unit_info(unit)
 		await _attack(selected_unit, unit)
 		_refresh_selection_after_action()
 		return
 
 	if unit.team == "enemy":
+		_show_unit_info(unit)
 		_inspect_enemy_movement(unit)
 
 
@@ -502,6 +599,7 @@ func _select_unit(unit: BattleUnit) -> void:
 # 这不会消耗行动，也不会选中敌人。
 func _inspect_enemy_movement(unit: BattleUnit) -> void:
 	_clear_selection()
+	_show_unit_info(unit)
 	reachable_cells = _find_reachable_cells(unit, false)
 	attackable_cells.clear()
 	board.set_highlights(reachable_cells, attackable_cells)
@@ -519,6 +617,7 @@ func _clear_selection() -> void:
 	attackable_cells.clear()
 	board.clear_highlights()
 	action_menu.visible = false
+	_show_unit_info(null)
 
 
 # 单位移动或攻击后刷新选择状态。
@@ -538,35 +637,40 @@ func _refresh_selection_after_action() -> void:
 
 # 把单位移动到目标格子，并播放一个很短的 Tween 动画。
 # 参数 unit 是要移动的单位；target_cell 是目标格子坐标。
-func _move_unit(unit: BattleUnit, target_cell: Vector2i) -> void:
+func _move_unit(unit: BattleUnit, target_cell: Vector2i, show_player_prompt := true) -> void:
 	unit.grid_position = target_cell
 	unit.has_moved = true
 	unit.play_move_animation(0.18)
 	var tween := create_tween()
 	tween.tween_property(unit, "position", Vector2(target_cell) * board.cell_size + Vector2(board.cell_size, board.cell_size) * 0.5, 0.18).set_trans(Tween.TRANS_SINE)
 	await tween.finished
-	attackable_cells = _find_attack_cells(unit.grid_position, unit.attack_range, true)
-	board.set_highlights([], attackable_cells)
-	_show_info("%s moved. You may attack if a target is in range." % unit.unit_name)
+	if show_player_prompt:
+		attackable_cells = _find_attack_cells(unit.grid_position, unit.attack_range, true)
+		board.set_highlights([], attackable_cells)
+		_show_info("%s moved. %s" % [unit.unit_name, _attack_preview_text(unit)])
 
 
 # 执行一次普通攻击。
 # 参数 attacker 是攻击者；defender 是受击者。
 # 当前规则：攻击后攻击者本回合行动结束；目标血量为 0 时从战场移除。
-func _attack(attacker: BattleUnit, defender: BattleUnit) -> void:
+func _attack(attacker: BattleUnit, defender: BattleUnit) -> int:
 	await attacker.play_attack_animation(defender.position)
 	var defender_defeated := defender.take_damage(attacker.attack_power)
 	attacker.has_acted = true
+	var damage_dealt := defender.last_damage_taken
+	_show_float_at_unit(defender, "-%d" % damage_dealt, Color("#ff6961"))
 	_show_info("%s attacks %s for %d damage." % [attacker.unit_name, defender.unit_name, attacker.attack_power])
 
 	if defender_defeated:
 		await defender.play_hit_animation()
 		await defender.play_defeat_animation()
 		await defender.play_death_animation()
+		defeated_unit_names.append(defender.unit_name)
 		units.erase(defender)
 		defender.queue_free()
 	else:
 		await defender.play_hit_animation()
+	return damage_dealt
 
 
 # 玩家点击“End Turn”按钮时调用。
@@ -594,22 +698,26 @@ func _run_enemy_turn() -> void:
 		if phase != Phase.ENEMY_TURN:
 			return
 
-		var target := _nearest_unit(enemy.grid_position, "player")
+		var target := _choose_enemy_target(enemy)
 		if target == null:
 			break
+		_show_info("%s targets %s." % [enemy.unit_name, target.unit_name])
+		await get_tree().create_timer(0.2).timeout
 
 		if _distance(enemy.grid_position, target.grid_position) <= enemy.attack_range:
-			await _attack(enemy, target)
+			var damage := await _attack(enemy, target)
+			await _after_enemy_attack(enemy, damage)
 			_check_battle_end()
 			await get_tree().create_timer(0.25).timeout
 			continue
 
 		var next_cell := _best_enemy_move(enemy, target.grid_position)
 		if next_cell != enemy.grid_position:
-			await _move_unit(enemy, next_cell)
+			await _move_unit(enemy, next_cell, false)
 
 		if is_instance_valid(target) and _distance(enemy.grid_position, target.grid_position) <= enemy.attack_range:
-			await _attack(enemy, target)
+			var damage := await _attack(enemy, target)
+			await _after_enemy_attack(enemy, damage)
 
 		_check_battle_end()
 		await get_tree().create_timer(0.25).timeout
@@ -618,12 +726,20 @@ func _run_enemy_turn() -> void:
 # 开始新的玩家回合。
 # 重置所有玩家单位的移动和行动状态，然后刷新 UI。
 func _start_player_turn() -> void:
+	current_turn += 1
 	for unit in units:
 		if unit.team == "player":
 			unit.tick_skill_cooldown()
 			unit.reset_turn()
 	phase = Phase.PLAYER_TURN
-	_show_info("Player turn. Select a unit.")
+	if current_turn > MAX_TURNS:
+		phase = Phase.DEFEAT
+		battle_result_reason = "Turn limit exceeded."
+		_clear_selection()
+		_show_info(_battle_summary())
+		_show_result_panel()
+	else:
+		_show_info("Player turn. %s" % _mission_brief())
 	_update_ui()
 
 
@@ -635,12 +751,22 @@ func _check_battle_end() -> void:
 
 	if enemy_count == 0:
 		phase = Phase.VICTORY
+		battle_result_reason = "All enemies defeated."
 		_clear_selection()
-		_show_info("Victory! All enemies are defeated.")
+		_show_info(_battle_summary())
+		_show_result_panel()
 	elif player_count == 0:
 		phase = Phase.DEFEAT
+		battle_result_reason = "All player units are down."
 		_clear_selection()
-		_show_info("Defeat. All player units are down.")
+		_show_info(_battle_summary())
+		_show_result_panel()
+	elif not _protected_unit_alive():
+		phase = Phase.DEFEAT
+		battle_result_reason = "%s was defeated." % PROTECTED_UNIT_NAME
+		_clear_selection()
+		_show_info(_battle_summary())
+		_show_result_panel()
 
 	_update_ui()
 
@@ -701,15 +827,64 @@ func _find_attack_cells(origin: Vector2i, attack_range: int, only_enemies := fal
 func _best_enemy_move(enemy: BattleUnit, target_cell: Vector2i) -> Vector2i:
 	var candidates := _find_reachable_cells(enemy)
 	var best_cell := enemy.grid_position
-	var best_distance := _distance(enemy.grid_position, target_cell)
+	var best_score := 9999
+	var desired_range := enemy.attack_range
 
 	for cell in candidates:
 		var distance := _distance(cell, target_cell)
-		if distance < best_distance:
-			best_distance = distance
+		var score := absi(distance - desired_range)
+		if distance > enemy.attack_range:
+			score += distance
+		if enemy.unit_name.to_lower() == "necromancer" and distance <= 1:
+			score += 6
+		if score < best_score:
+			best_score = score
 			best_cell = cell
 
 	return best_cell
+
+
+func _choose_enemy_target(enemy: BattleUnit) -> BattleUnit:
+	var candidates: Array[BattleUnit] = []
+	for unit in units:
+		if unit.team == "player":
+			candidates.append(unit)
+	if candidates.is_empty():
+		return null
+
+	var enemy_key := enemy.unit_name.to_lower()
+	var best_target: BattleUnit = null
+	var best_score := 999999.0
+	for candidate in candidates:
+		var distance := float(_distance(enemy.grid_position, candidate.grid_position))
+		var hp_ratio := float(candidate.hp) / float(candidate.max_hp)
+		var score := distance * 10.0 + hp_ratio * 20.0
+		match enemy_key:
+			"goblin":
+				score = float(candidate.hp) * 4.0 + distance
+				if distance <= float(enemy.attack_range):
+					score -= 20.0
+			"werewolf":
+				score = distance * 7.0 + hp_ratio * 28.0
+			"necromancer":
+				score = distance * 6.0 + hp_ratio * 12.0
+				if candidate.unit_name == "Cleric" or candidate.unit_name == "Mage":
+					score -= 25.0
+			"vampire":
+				score = distance * 8.0 - float(candidate.hp)
+		if best_target == null or score < best_score:
+			best_target = candidate
+			best_score = score
+	return best_target
+
+
+func _after_enemy_attack(enemy: BattleUnit, damage_dealt: int) -> void:
+	if enemy.unit_name.to_lower() != "vampire" or damage_dealt <= 0 or not is_instance_valid(enemy):
+		return
+	var healed := enemy.heal(maxi(1, ceili(float(damage_dealt) * 0.5)))
+	if healed > 0:
+		_show_float_at_unit(enemy, "+%d" % healed, Color("#d274ff"))
+		await _play_heal_animation(enemy)
 
 
 # 查找距离 from_cell 最近的某个阵营单位。
@@ -747,14 +922,54 @@ func _show_info(text: String) -> void:
 	info_label.text = text
 
 
+func _show_unit_info(unit: BattleUnit) -> void:
+	if unit_info_label == null:
+		return
+	if unit == null or not is_instance_valid(unit):
+		unit_info_label.text = "%s\n\n%s\n\nSelect a unit to view stats." % [LEVEL_NAME, _mission_brief()]
+		return
+	var skill_line := _skill_preview_text(unit) if _skill_key(unit) != "" else "No skill"
+	unit_info_label.text = "%s\n%s\n\nHP: %d / %d\nATK: %d   MOV: %d   RNG: %d\nStatus: %s\nSkill: %s" % [
+		"ALLY" if unit.team == "player" else "ENEMY",
+		unit.unit_name,
+		unit.hp,
+		unit.max_hp,
+		unit.attack_power,
+		unit.move_range,
+		unit.attack_range,
+		_unit_status(unit),
+		skill_line,
+	]
+
+
+func _show_result_panel() -> void:
+	if result_panel == null or result_label == null:
+		return
+	result_panel.visible = true
+	result_label.text = "%s\n\n%s\n\nGrade: %s\nTurns: %d / %d\nSurvivors: %d\nDefeated: %s" % [
+		"VICTORY" if phase == Phase.VICTORY else "DEFEAT",
+		battle_result_reason,
+		_result_grade(),
+		current_turn,
+		MAX_TURNS,
+		units.filter(func(unit: BattleUnit) -> bool: return unit.team == "player").size(),
+		"none" if defeated_unit_names.is_empty() else ", ".join(defeated_unit_names),
+	]
+
+
+func _hide_result_panel() -> void:
+	if result_panel != null:
+		result_panel.visible = false
+
+
 # 根据当前 phase 刷新回合文字和结束回合按钮状态。
 func _update_ui() -> void:
 	match phase:
 		Phase.PLAYER_TURN:
-			turn_label.text = "Player Turn"
+			turn_label.text = "Turn %d/%d - Player" % [current_turn, MAX_TURNS]
 			end_turn_button.disabled = false
 		Phase.ENEMY_TURN:
-			turn_label.text = "Enemy Turn"
+			turn_label.text = "Turn %d/%d - Enemy" % [current_turn, MAX_TURNS]
 			end_turn_button.disabled = true
 		Phase.VICTORY:
 			turn_label.text = "Victory"
@@ -762,3 +977,128 @@ func _update_ui() -> void:
 		Phase.DEFEAT:
 			turn_label.text = "Defeat"
 			end_turn_button.disabled = true
+
+
+func _mission_brief() -> String:
+	return "Objective: defeat all enemies in %d turns. Protect %s." % [MAX_TURNS, PROTECTED_UNIT_NAME]
+
+
+func _unit_summary(unit: BattleUnit) -> String:
+	var team_name := "Ally" if unit.team == "player" else "Enemy"
+	var skill_text := _skill_name(unit) if _skill_key(unit) != "" else "No skill"
+	return "%s %s | HP %d/%d | ATK %d | MOV %d | RNG %d | %s | %s" % [
+		team_name,
+		unit.unit_name,
+		unit.hp,
+		unit.max_hp,
+		unit.attack_power,
+		unit.move_range,
+		unit.attack_range,
+		skill_text,
+		_unit_status(unit),
+	]
+
+
+func _preview_attack_result(attacker: BattleUnit, defender: BattleUnit) -> String:
+	var damage := _preview_damage(attacker, defender)
+	var remaining := maxi(0, defender.hp - damage)
+	var kill_text := " Kill confirmed." if remaining == 0 else ""
+	return "%s -> %s | %d damage | HP %d -> %d.%s" % [
+		attacker.unit_name,
+		defender.unit_name,
+		damage,
+		defender.hp,
+		remaining,
+		kill_text,
+	]
+
+
+func _preview_damage(attacker: BattleUnit, defender: BattleUnit) -> int:
+	var damage := attacker.attack_power
+	if defender.is_defending:
+		damage = ceili(float(damage) * 0.5)
+	return maxi(1, damage)
+
+
+func _unit_status(unit: BattleUnit) -> String:
+	if unit.hp <= 0:
+		return "Down"
+	if unit.is_defending:
+		return "Guarding"
+	if unit.has_acted:
+		return "Acted"
+	if unit.has_moved:
+		return "Moved"
+	if unit.skill_cooldown_remaining > 0:
+		return "CD %d" % unit.skill_cooldown_remaining
+	return "Ready"
+
+
+func _attack_preview_text(unit: BattleUnit) -> String:
+	return "Damage %d, range %d. Choose a red target." % [unit.attack_power, unit.attack_range]
+
+
+func _skill_preview_text(unit: BattleUnit) -> String:
+	var key := _skill_key(unit)
+	match key:
+		"warrior":
+			return "3x3 sweep, %d damage, CD %d." % [maxi(1, roundi(float(unit.attack_power) * 1.2)), _skill_cooldown(unit)]
+		"mage":
+			return "front area, %d damage, CD %d." % [maxi(1, roundi(float(unit.attack_power) * 1.5)), _skill_cooldown(unit)]
+		"ranger":
+			return "line shot, %d damage, CD %d." % [maxi(1, roundi(float(unit.attack_power) * 1.2)), _skill_cooldown(unit)]
+		"cleric":
+			return "heal allies in 3x3, CD %d." % _skill_cooldown(unit)
+	return "No skill."
+
+
+func _protected_unit_alive() -> bool:
+	for unit in units:
+		if unit.team == "player" and unit.unit_name == PROTECTED_UNIT_NAME and unit.hp > 0:
+			return true
+	return false
+
+
+func _battle_summary() -> String:
+	var surviving_players := units.filter(func(unit: BattleUnit) -> bool: return unit.team == "player").size()
+	var defeated_text := "none" if defeated_unit_names.is_empty() else ", ".join(defeated_unit_names)
+	return "%s | Turns %d/%d | Survivors %d | Defeated: %s" % [
+		battle_result_reason,
+		current_turn,
+		MAX_TURNS,
+		surviving_players,
+		defeated_text,
+	]
+
+
+func _result_grade() -> String:
+	if phase != Phase.VICTORY:
+		return "C"
+	var player_losses := 0
+	for name in defeated_unit_names:
+		for data in DEFAULT_UNIT_DATA:
+			if String(data.get("name", "")) == name and String(data.get("team", "")) == "player":
+				player_losses += 1
+	if current_turn <= 6 and player_losses == 0:
+		return "S"
+	if player_losses == 0:
+		return "A"
+	return "B"
+
+
+func _show_float_at_unit(unit: BattleUnit, text: String, color: Color) -> void:
+	if not is_instance_valid(unit):
+		return
+	var label := Label.new()
+	label.text = text
+	label.modulate = color
+	label.position = unit.position + Vector2(-18.0, -44.0)
+	label.add_theme_font_size_override("font_size", 18)
+	if effect_root != null:
+		effect_root.add_child(label)
+	else:
+		board.add_child(label)
+	var tween := create_tween()
+	tween.tween_property(label, "position", label.position + Vector2(0.0, -24.0), 0.55)
+	tween.parallel().tween_property(label, "modulate", Color(color.r, color.g, color.b, 0.0), 0.55)
+	tween.tween_callback(Callable(label, "queue_free"))

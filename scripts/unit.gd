@@ -42,6 +42,7 @@ var skill_cooldown_remaining := 0
 # 当前生命值。
 # setup() 会把它初始化为 max_hp。
 var hp := max_hp
+var last_damage_taken := 0
 
 # 本回合是否已经移动过。
 # 用来防止单位在同一回合无限移动。
@@ -116,6 +117,7 @@ func take_damage(amount: int) -> bool:
 	if is_defending:
 		final_amount = ceili(float(amount) * 0.5)
 		is_defending = false
+	last_damage_taken = final_amount
 	hp = max(hp - final_amount, 0)
 	queue_redraw()
 	return hp == 0
@@ -291,21 +293,32 @@ func play_death_animation() -> void:
 # 现在角色本体已经改为 Sprite2D，这里只保留选中圈、悬停圈和血条。
 func _draw() -> void:
 	var radius := cell_size * 0.32
-	var ring_color := Color("#f4e38b") if is_selected else Color("#1f2630")
+	var team_color := Color("#4aa3ff") if team == "player" else Color("#ff5f5f")
+	var ring_color := Color("#f4e38b") if is_selected else team_color
 	if has_acted:
 		ring_color = ring_color.darkened(0.35)
 
 	draw_circle(Vector2(0.0, 8.0), radius * 0.85, Color(0.0, 0.0, 0.0, 0.28))
-	draw_arc(Vector2.ZERO, radius + 4.0, 0.0, TAU, 48, ring_color, 3.0)
+	draw_arc(Vector2.ZERO, radius + 1.0, 0.0, TAU, 48, team_color.darkened(0.15), 2.0)
+	draw_arc(Vector2.ZERO, radius + 5.0, 0.0, TAU, 48, ring_color, 3.0)
 
 	if is_hovered:
 		draw_arc(Vector2.ZERO, radius + 8.0, 0.0, TAU, 48, Color.WHITE, 2.0)
+	if is_defending:
+		draw_arc(Vector2.ZERO, radius + 11.0, 0.0, TAU, 48, Color("#85a9ff"), 2.0)
+	if has_acted:
+		draw_circle(Vector2.ZERO, radius * 0.72, Color(0.08, 0.09, 0.11, 0.34))
 
 	var hp_ratio := float(hp) / float(max_hp)
 	var bar_width := cell_size * 0.62
 	var bar_pos := Vector2(-bar_width * 0.5, radius + 8.0)
+	var hp_color := Color("#62d26f")
+	if hp_ratio <= 0.35:
+		hp_color = Color("#ef5c56")
+	elif hp_ratio <= 0.65:
+		hp_color = Color("#e7c95a")
 	draw_rect(Rect2(bar_pos, Vector2(bar_width, 6.0)), Color("#26313f"))
-	draw_rect(Rect2(bar_pos, Vector2(bar_width * hp_ratio, 6.0)), Color("#62d26f"))
+	draw_rect(Rect2(bar_pos, Vector2(bar_width * hp_ratio, 6.0)), hp_color)
 
 
 # Area2D 接收到鼠标事件时调用。
